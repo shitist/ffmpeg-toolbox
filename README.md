@@ -1,6 +1,6 @@
-# ffmpeg-toolbox 🧰
+# ffmpeg-toolbox
 
-> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。  
+> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection and more.
 
 ---
@@ -21,15 +21,16 @@
 
 ## 使用方法 / Usage
 
-### 🖱️ 交互菜单 / Interactive Menu
+### 交互菜单 / Interactive Menu
 双击运行 `ffmpeg自动工具箱.exe` 或 `ffmpeg自动工具箱.bat`，在菜单中选择功能编号即可。  
 Double-click `ffmpeg自动工具箱.exe` or `ffmpeg自动工具箱.bat`, then select a function by number.
 
-### 📎 拖拽文件 / Drag & Drop
+### 拖拽文件 / Drag and Drop
 将视频文件直接拖到 exe 或 bat 图标上，工具会自动识别文件路径，跳过输入步骤。  
-Drag video files onto the exe/bat icon to auto-detect paths and skip manual input.
+Drag video files onto the exe/bat icon to auto-detect file paths and skip manual input.
 
-You can also drag two files for comparison features (SSIM, diff, quality report).
+也可以同时拖入两个文件用于对比功能（SSIM、差值图、质量对比）。  
+You can also drag two files at once for comparison features (SSIM, diff, quality report).
 
 ---
 
@@ -39,15 +40,18 @@ You can also drag two files for comparison features (SSIM, diff, quality report)
 - **Windows** (PowerShell 5.1+)
 
 首次启动时，工具会自动检测系统 PATH 中的 ffmpeg。如果未找到，会提示手动输入路径。  
-On first launch, the tool auto-detects ffmpeg from your system PATH. If not found, you'll be prompted to enter the path manually.
+On first launch, the tool auto-detects ffmpeg from your system PATH. If not found, you will be prompted to enter the path manually.
 
 ---
 
 ## 安装 / Installation
 
-1. 从 [Releases](https://github.com/shitist/ffmpeg-toolbox/releases) 下载最新版本，或者直接克隆仓库。
-2. 确保 ffmpeg 已安装并配置到系统 PATH 中。
-3. 运行 `ffmpeg自动工具箱.exe` 即可。
+1. 从 [Releases](https://github.com/shitist/ffmpeg-toolbox/releases) 下载最新版本，或者直接克隆仓库。  
+   Download the latest release from [Releases](https://github.com/shitist/ffmpeg-toolbox/releases), or clone the repository directly.
+2. 确保 ffmpeg 已安装并配置到系统 PATH 中。  
+   Make sure ffmpeg is installed and added to your system PATH.
+3. 运行 `ffmpeg自动工具箱.exe` 即可。  
+   Run `ffmpeg自动工具箱.exe` to start.
 
 ---
 
@@ -55,11 +59,11 @@ On first launch, the tool auto-detects ffmpeg from your system PATH. If not foun
 
 ```
 ffmpeg-toolbox/
-├── ffmpeg_toolbox.ps1          # 主脚本 (PowerShell)
-├── ffmpeg自动工具箱.bat        # 批处理启动器
-├── ffmpeg自动工具箱.exe        # 打包的可执行文件 (PS2EXE)
-├── ffmpeg代码集.txt            # ffmpeg 参考命令笔记
-└── README.md                   # 本文件
+├── ffmpeg_toolbox.ps1          # 主脚本 (PowerShell) / Main script
+├── ffmpeg自动工具箱.bat        # 批处理启动器 / Batch launcher
+├── ffmpeg自动工具箱.exe        # 打包的可执行文件 (PS2EXE) / Packaged executable
+├── ffmpeg代码集.txt            # ffmpeg 参考命令笔记 / ffmpeg command reference
+└── README.md                   # 说明文件 / This file
 ```
 
 ---
