@@ -1,5 +1,4 @@
-# ffmpeg路径
-"C:\Users\stpr\.stacher\ffmpeg.exe"
+# ffmpeg 已通过系统 PATH 自动检测，无需硬编码路径
 
 # 分色带刻度频谱
 ffmpeg -i input.mp4 -lavfi "showspectrumpic=s=1920x1080:color=magma:scale=log:legend=1" output.jpg
