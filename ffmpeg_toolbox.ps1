@@ -140,7 +140,8 @@ function Convert-LowLoss {
     $file = Get-InputFile $InputPath "请输入路径"
     if (-not (Test-Path -LiteralPath $file)) { Write-Host "文件不存在"; Wait-UserAction; return }
     $outFile = [System.IO.Path]::ChangeExtension($file, "_lowloss.mp4")
-    & $ffmpegPath -i $file -c:v libx264 -crf 18 -preset slow -c:a aac -b:a 320k $outFile
+    $cmd = "$ffmpegPath -y -i `"$file`" -c:v libx264 -crf 18 -preset slow -c:a aac -b:a 320k `"$outFile`" 2>&1"
+    cmd /c $cmd
     Write-Host "`n完成！" -ForegroundColor Green
     Wait-UserAction
 }
@@ -151,7 +152,8 @@ function Convert-Normal {
     $file = Get-InputFile $InputPath "请输入路径"
     if (-not (Test-Path -LiteralPath $file)) { Write-Host "文件不存在"; Wait-UserAction; return }
     $outFile = [System.IO.Path]::ChangeExtension($file, "_normal.mp4")
-    & $ffmpegPath -i $file -c:v libx264 -crf 18 -c:a aac -b:a 192k $outFile
+    $cmd = "$ffmpegPath -y -i `"$file`" -c:v libx264 -crf 18 -c:a aac -b:a 192k `"$outFile`" 2>&1"
+    cmd /c $cmd
     Write-Host "`n完成！" -ForegroundColor Green
     Wait-UserAction
 }
@@ -161,7 +163,8 @@ function Test-Probe {
     Write-Host "`n[核对参数]" -ForegroundColor Yellow
     $file = Get-InputFile $InputPath "请输入路径"
     if (-not (Test-Path -LiteralPath $file)) { Write-Host "文件不存在"; Wait-UserAction; return }
-    & $ffprobePath -v error -select_streams v:0 -show_entries stream=bit_rate,width,height,r_frame_rate -of default=noprint_wrappers=1 $file
+    $cmd = "$ffprobePath -v error -select_streams v:0 -show_entries stream=bit_rate,width,height,r_frame_rate -of default=noprint_wrappers=1 `"$file`" 2>&1"
+    cmd /c $cmd
     Wait-UserAction
 }
 
@@ -171,7 +174,8 @@ function New-Spectrum {
     $file = Get-InputFile $InputPath "请输入路径"
     if (-not (Test-Path -LiteralPath $file)) { Write-Host "文件不存在"; Wait-UserAction; return }
     $outFile = [System.IO.Path]::ChangeExtension($file, "_spectrum.jpg")
-    & $ffmpegPath -i $file -lavfi "showspectrumpic=s=1920x1080:color=magma:scale=log:legend=1" $outFile
+    $cmd = "$ffmpegPath -y -i `"$file`" -lavfi `"showspectrumpic=s=1920x1080:color=magma:scale=log:legend=1`" -frames:v 1 -update 1 `"$outFile`" 2>&1"
+    cmd /c $cmd
     Write-Host "`n完成！" -ForegroundColor Green
     Wait-UserAction
 }
@@ -183,7 +187,7 @@ function Compare-SSIM {
     $f2 = Get-InputFile $f2_in "请输入第二个路径"
     if (-not (Test-Path -LiteralPath $f1) -or -not (Test-Path -LiteralPath $f2)) { Write-Host "文件不存在"; Wait-UserAction; return }
     Write-Host "正在计算..."
-    $output = & $ffmpegPath -i $f1 -i $f2 -filter_complex ssim -f null - 2>&1
+    $output = cmd /c "$ffmpegPath -i `"$f1`" -i `"$f2`" -filter_complex ssim -f null - 2>&1"
     $line = $output | Where-Object { $_ -match "All:(\d\.\d+)" }
     if ($line -match "All:(\d\.\d+)") {
         $scoreText = $matches[1]
@@ -201,7 +205,8 @@ function Compare-Diff {
     $f2 = Get-InputFile $f2_in "请输入第二个路径"
     if (-not (Test-Path -LiteralPath $f1) -or -not (Test-Path -LiteralPath $f2)) { Write-Host "文件不存在"; Wait-UserAction; return }
     $outFile = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($f1), "difference.jpg")
-    & $ffmpegPath -i $f1 -i $f2 -filter_complex "blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val" -frames:v 1 -q:v 2 -update 1 $outFile
+    $cmd = "$ffmpegPath -y -i `"$f1`" -i `"$f2`" -filter_complex `"blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val`" -frames:v 1 -q:v 2 -update 1 `"$outFile`" 2>&1"
+    cmd /c $cmd
     Write-Host "已保存: $outFile" -ForegroundColor Green
     Wait-UserAction
 }
@@ -214,7 +219,7 @@ function Compare-Quality {
     if (-not (Test-Path -LiteralPath $f1) -or -not (Test-Path -LiteralPath $f2)) { Write-Host "文件不存在"; Wait-UserAction; return }
     
     Write-Host "1/2 计算 SSIM..."
-    $output = & $ffmpegPath -i $f1 -i $f2 -filter_complex ssim -f null - 2>&1
+    $output = cmd /c "$ffmpegPath -i `"$f1`" -i `"$f2`" -filter_complex ssim -f null - 2>&1"
     $scoreText = "失败"
     if (($output | Where-Object { $_ -match "All:(\d\.\d+)" }) -match "All:(\d\.\d+)") {
         $val = [double]::Parse($matches[1], [System.Globalization.CultureInfo]::InvariantCulture)
@@ -223,7 +228,12 @@ function Compare-Quality {
     
     Write-Host "2/2 生成差值图..."
     $outFile = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($f1), "quality_report.jpg")
-    & $ffmpegPath -i $f1 -i $f2 -filter_complex "blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val" -frames:v 1 -q:v 2 -update 1 $outFile
+    $cmd = "$ffmpegPath -y -i `"$f1`" -i `"$f2`" -filter_complex `"blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val`" -frames:v 1 -q:v 2 -update 1 `"$outFile`" 2>&1"
+    cmd /c $cmd
+    
+    Write-Host "`n结果: SSIM $scoreText" -ForegroundColor Green
+    $cmd = "`"$ffmpegPath`" -i `"$f1`" -i `"$f2`" -filter_complex `"blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val`" -frames:v 1 -q:v 2 -update 1 `"$outFile`" 2>&1"
+    cmd /c $cmd
     
     Write-Host "`n结果: SSIM $scoreText" -ForegroundColor Green
     Write-Host "图片: $outFile" -ForegroundColor Green
