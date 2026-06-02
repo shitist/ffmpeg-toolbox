@@ -16,6 +16,7 @@
 | 5 | **SSIM 还原百分比（双文件对比）** | SSIM structural similarity comparison between two files |
 | 6 | **差值图（高亮强化，双文件对比）** | Generate difference map with enhanced highlights |
 | 7 | **全方位质量对比（分值+图）** | Comprehensive quality comparison (SSIM score + difference image) |
+| 8 | **嵌入硬字幕（高画质）** | Burn hard subtitles (SRT/ASS, CRF18, audio pass-through) |
 
 ---
 
@@ -29,8 +30,19 @@ Double-click `ffmpeg自动工具箱.exe` or `ffmpeg自动工具箱.bat`, then se
 将视频文件直接拖到 exe 或 bat 图标上，工具会自动识别文件路径，跳过输入步骤。  
 Drag video files onto the exe/bat icon to auto-detect file paths and skip manual input.
 
-也可以同时拖入两个文件用于对比功能（SSIM、差值图、质量对比）。  
-You can also drag two files at once for comparison features (SSIM, diff, quality report).
+也可以同时拖入两个文件用于对比功能（SSIM、差值图、质量对比），或视频+字幕用于硬字幕嵌入。  
+You can also drag two files at once for comparison (SSIM, diff, quality) or video+subtitle for hard subtitles.
+
+---
+
+## GUI 版 / GUI Version
+
+`ffmpeg_toolbox_gui.exe` — 暗色主题图形界面，拖拽即用。  
+`ffmpeg_toolbox_gui.exe` — Dark-themed graphical interface, drag and drop ready.
+
+- 拖拽视频到窗口自动显示分辨率/帧率/码率
+- 功能按钮一键运行，内嵌控制台实时输出
+- 对比和字幕功能自动弹出文件选择框
 
 ---
 
