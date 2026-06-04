@@ -1,7 +1,9 @@
 # ffmpeg-toolbox
 
-> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。
+> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。  
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection and more.
+
+![version](https://img.shields.io/badge/version-v2.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
@@ -42,6 +44,8 @@ You can also drag two files at once for comparison (SSIM, diff, quality) or vide
 
 - 拖拽视频到窗口自动显示分辨率/帧率/码率
 - 功能按钮一键运行，内嵌控制台实时输出
+- 实时进度条（百分比 + 耗时 + 剩余时间 + 编码速度）
+- 支持中途取消任务，崩溃自动恢复并报错
 - 对比和字幕功能自动弹出文件选择框
 
 ---
@@ -71,10 +75,11 @@ On first launch, the tool auto-detects ffmpeg from your system PATH. If not foun
 
 ```
 ffmpeg-toolbox/
-├── ffmpeg_toolbox.ps1          # 主脚本 (PowerShell) / Main script
-├── ffmpeg自动工具箱.bat        # 批处理启动器 / Batch launcher
-├── ffmpeg自动工具箱.exe        # 打包的可执行文件 (PS2EXE) / Packaged executable
-├── ffmpeg代码集.txt            # ffmpeg 参考命令笔记 / ffmpeg command reference
+├── ffmpeg_toolbox.ps1          # 主脚本 (PowerShell CLI) / Main script (CLI)
+├── ffmpeg_toolbox_gui.ps1      # GUI 脚本 (PowerShell) / GUI script
+├── ffmpeg自动工具箱.bat         # 批处理启动器 / Batch launcher
+├── ffmpeg自动工具箱.exe         # CLI 打包可执行文件 / Packaged CLI executable
+├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / Packaged GUI executable
 └── README.md                   # 说明文件 / This file
 ```
 

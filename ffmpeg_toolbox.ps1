@@ -79,11 +79,12 @@ function Show-MainMenu {
     Write-Host "  5. SSIM 还原百分比 (双文件对比)"
     Write-Host "  6. 差值图 (高亮强化, 双文件对比)"
     Write-Host "  7. 全方位质量对比 (分值+图)"
+    Write-Host "  8. 嵌入硬字幕 (高画质)"
     Write-Host ""
     Write-Host "  0. 退出"
     Write-Host "====================================================" -ForegroundColor Cyan
     
-    $choice = Read-Host "请输入功能编号 (0-7)"
+    $choice = Read-Host "请输入功能编号 (0-8)"
     
     switch ($choice) {
         "1" { Convert-LowLoss }
@@ -93,6 +94,7 @@ function Show-MainMenu {
         "5" { Compare-SSIM }
         "6" { Compare-Diff }
         "7" { Compare-Quality }
+        "8" { Convert-Subtitle }
         "0" { exit }
         default { Show-MainMenu }
     }
@@ -115,11 +117,12 @@ function Show-DragMenu {
     Write-Host "  5. SSIM 还原百分比 (需对比文件)"
     Write-Host "  6. 差值图 (高亮强化)"
     Write-Host "  7. 全方位质量对比"
+    Write-Host "  8. 嵌入硬字幕 (高画质)"
     Write-Host ""
     Write-Host "  0. 退出"
     Write-Host "====================================================" -ForegroundColor Cyan
 
-    $choice = Read-Host "请输入功能编号 (0-7)"
+    $choice = Read-Host "请输入功能编号 (0-8)"
     
     switch ($choice) {
         "1" { Convert-LowLoss $f1 }
@@ -129,6 +132,7 @@ function Show-DragMenu {
         "5" { Compare-SSIM $f1 $f2 }
         "6" { Compare-Diff $f1 $f2 }
         "7" { Compare-Quality $f1 $f2 }
+        "8" { Convert-Subtitle $f1 $f2 }
         "0" { exit }
         default { Show-DragMenu }
     }
@@ -237,6 +241,79 @@ function Compare-Quality {
     
     Write-Host "`n结果: SSIM $scoreText" -ForegroundColor Green
     Write-Host "图片: $outFile" -ForegroundColor Green
+    Wait-UserAction
+}
+
+function Convert-Subtitle {
+    param([string]$InputPath = "", [string]$SubtitlePath = "")
+    Write-Host "`n[嵌入硬字幕 (高画质)]" -ForegroundColor Yellow
+    $video = Get-InputFile $InputPath "请输入视频路径"
+    if (-not (Test-Path -LiteralPath $video)) { Write-Host "文件不存在"; Wait-UserAction; return }
+
+    # 如果拖入了第二个文件且是字幕格式，自动使用
+    $subFile = ""
+    if ($SubtitlePath -and (Test-Path -LiteralPath $SubtitlePath)) {
+        $ext = [System.IO.Path]::GetExtension($SubtitlePath).ToLower()
+        if ($ext -eq ".srt" -or $ext -eq ".ass") {
+            $subFile = $SubtitlePath
+            Write-Host "自动检测到字幕: $SubtitlePath" -ForegroundColor Cyan
+        }
+    }
+    if (-not $subFile) {
+        $subFile = Read-Host "请输入字幕文件路径 (srt 或 ass)"
+        $subFile = $subFile.Trim('"')
+    }
+    if (-not (Test-Path -LiteralPath $subFile)) { Write-Host "文件不存在"; Wait-UserAction; return }
+
+    $fontName = Read-Host "请输入字体名称 (留空默认: 微软雅黑)"
+    if ([string]::IsNullOrWhiteSpace($fontName)) { $fontName = "Microsoft YaHei" }
+
+    # 准备临时目录（避免 subtitles 滤镜解析路径中的冒号）
+    $tmpDir = [System.IO.Path]::Combine($env:TEMP, "ffmpeg_toolbox_sub")
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+
+    $ext = [System.IO.Path]::GetExtension($subFile).ToLower()
+    $localSub = [System.IO.Path]::Combine($tmpDir, "subtitle$ext")
+    Copy-Item -LiteralPath $subFile -Destination $localSub -Force
+
+    # 生成输出路径
+    $outFile = [System.IO.Path]::Combine(
+        [System.IO.Path]::GetDirectoryName($video),
+        [System.IO.Path]::GetFileNameWithoutExtension($video) + "_字幕版.mp4"
+    )
+
+    # SRT 需先转为 ASS 才能自定义字体
+    if ($ext -eq ".srt") {
+        Write-Host "正在转换 SRT 到 ASS ..."
+        Push-Location $tmpDir
+        cmd /c "`"$ffmpegPath`" -sub_charenc UTF-8 -i subtitle.srt subtitle.ass 2>&1"
+        Pop-Location
+
+        $assLocal = [System.IO.Path]::Combine($tmpDir, "subtitle.ass")
+        if (Test-Path -LiteralPath $assLocal) {
+            # 必须用 -Encoding UTF8 读取，否则日文系统会误判为 Shift-JIS 导致中文乱码
+            $assContent = Get-Content -LiteralPath $assLocal -Raw -Encoding UTF8
+            $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
+            Set-Content -LiteralPath $assLocal -Value $assContent -Encoding UTF8
+            $localSub = $assLocal
+        }
+    } elseif ($ext -eq ".ass") {
+        # 直接替换 ASS 中的字体名
+        $assContent = Get-Content -LiteralPath $localSub -Raw -Encoding UTF8
+        $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
+        Set-Content -LiteralPath $localSub -Value $assContent -Encoding UTF8
+    }
+
+    Write-Host "正在压制字幕 (CRF 18, audio copy) ..."
+    Push-Location $tmpDir
+    $subName = [System.IO.Path]::GetFileName($localSub)
+    cmd /c "`"$ffmpegPath`" -y -i `"$video`" -vf `"subtitles=$subName`" -c:v libx264 -crf 18 -preset slow -c:a copy `"$outFile`" 2>&1"
+    Pop-Location
+
+    # 清理临时文件
+    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host "`n完成！输出: $outFile" -ForegroundColor Green
     Wait-UserAction
 }
 
