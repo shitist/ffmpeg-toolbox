@@ -37,7 +37,7 @@ You can also drag two files at once for comparison (SSIM, diff, quality) or vide
 
 ---
 
-## GUI 版 / GUI Version
+## GUI
 
 `ffmpeg_toolbox_gui.exe` — 图形界面，拖拽即用。  
 `ffmpeg_toolbox_gui.exe` — Graphical interface, drag and drop ready.
