@@ -11,8 +11,8 @@
 
 | # | 中文 | English |
 |---|------|---------|
-| 1 | **格式转换: webm 转 mp4（低损耗）** | Convert webm to mp4 (low-loss, CRF 18, slow preset, 320k audio) |
-| 2 | **格式转换: webm 转 mp4（普通）** | Convert webm to mp4 (normal, CRF 18, 192k audio) |
+| 1 | **格式转换: webm 转 mp4（低损耗）** | Convert webm to mp4 (low-loss, CRF18, slow preset, 320k audio) |
+| 2 | **格式转换: webm 转 mp4（普通）** | Convert webm to mp4 (normal, CRF18, 192k audio) |
 | 3 | **核对分辨率、码率等基础参数** | Inspect video resolution, bitrate, frame rate via ffprobe |
 | 4 | **分色带刻度频谱** | Generate color spectrum visualization (showspectrumpic) |
 | 5 | **SSIM 还原百分比（双文件对比）** | SSIM structural similarity comparison between two files |
@@ -39,8 +39,8 @@ You can also drag two files at once for comparison (SSIM, diff, quality) or vide
 
 ## GUI 版 / GUI Version
 
-`ffmpeg_toolbox_gui.exe` — 暗色主题图形界面，拖拽即用。  
-`ffmpeg_toolbox_gui.exe` — Dark-themed graphical interface, drag and drop ready.
+`ffmpeg_toolbox_gui.exe` — 图形界面，拖拽即用。  
+`ffmpeg_toolbox_gui.exe` — Graphical interface, drag and drop ready.
 
 - 拖拽视频到窗口自动显示分辨率/帧率/码率
 - 功能按钮一键运行，内嵌控制台实时输出
