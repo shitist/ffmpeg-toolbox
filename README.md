@@ -3,7 +3,7 @@
 > 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。  
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection and more.
 
-![version](https://img.shields.io/badge/version-v2.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+![version](https://img.shields.io/badge/version-v2.0.0-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
@@ -79,12 +79,7 @@ ffmpeg-toolbox/
 ├── ffmpeg_toolbox_gui.ps1      # GUI 脚本 (PowerShell) / GUI script
 ├── ffmpeg自动工具箱.bat         # 批处理启动器 / Batch launcher
 ├── ffmpeg自动工具箱.exe         # CLI 打包可执行文件 / Packaged CLI executable
-├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / Packaged GUI executable
-└── README.md                   # 说明文件 / This file
+├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / GUI executable
+├── README.md                   # 说明文件 / This file
+└── LICENSE                     # MIT License
 ```
-
----
-
-## License
-
-MIT
