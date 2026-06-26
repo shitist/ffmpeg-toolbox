@@ -79,7 +79,7 @@ ffmpeg-toolbox/
 ├── ffmpeg_toolbox_gui.ps1      # GUI 脚本 (PowerShell) / GUI script
 ├── ffmpeg自动工具箱.bat         # 批处理启动器 / Batch launcher
 ├── ffmpeg自动工具箱.exe         # CLI 打包可执行文件 / Packaged CLI executable
-├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / GUI executable
+├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / Packaged GUI executable
 ├── README.md                   # 说明文件 / This file
 └── LICENSE                     # MIT License
 ```
