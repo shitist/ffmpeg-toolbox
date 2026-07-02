@@ -3,7 +3,7 @@
 > 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。  
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection and more.
 
-![version](https://img.shields.io/badge/version-v2.0.0-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![version](https://img.shields.io/badge/version-v2.0.1-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
@@ -18,7 +18,7 @@
 | 5 | **SSIM 还原百分比（双文件对比）** | SSIM structural similarity comparison between two files |
 | 6 | **差值图（高亮强化，双文件对比）** | Generate difference map with enhanced highlights |
 | 7 | **全方位质量对比（分值+图）** | Comprehensive quality comparison (SSIM score + difference image) |
-| 8 | **嵌入硬字幕（高画质）** | Burn hard subtitles (SRT/ASS, CRF18, audio pass-through) |
+| 8 | **嵌入硬字幕（高画质）** | Burn hard subtitles (GUI: CRF 16, compatible YUV420P; CLI: CRF 18) |
 
 ---
 

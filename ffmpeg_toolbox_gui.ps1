@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # ffmpeg 自动工具箱 GUI 版
 # ============================================================
 param(
@@ -29,17 +29,19 @@ if (-not $ffmpegPath -or -not $ffprobePath) {
 # ============================================================
 # 2. 暗色主题颜色常量
 # ============================================================
-$C_BG   = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$C_BG2  = [System.Drawing.Color]::FromArgb(45, 45, 45)
-$C_BG3  = [System.Drawing.Color]::FromArgb(60, 60, 60)
-$C_FG   = [System.Drawing.Color]::FromArgb(212, 212, 212)
-$C_ACC  = [System.Drawing.Color]::FromArgb(0, 122, 204)
-$C_ACCH = [System.Drawing.Color]::FromArgb(0, 150, 240)
-$C_BRD  = [System.Drawing.Color]::FromArgb(80, 80, 80)
-$C_CON  = [System.Drawing.Color]::FromArgb(0, 180, 0)
-$C_WARN = [System.Drawing.Color]::FromArgb(255, 180, 0)
-$C_OK   = [System.Drawing.Color]::FromArgb(80, 200, 80)
-$C_PROG = [System.Drawing.Color]::FromArgb(0, 200, 255)
+$C_BG   = [System.Drawing.Color]::FromArgb(18, 19, 22)
+$C_BG2  = [System.Drawing.Color]::FromArgb(31, 33, 37)
+$C_BG3  = [System.Drawing.Color]::FromArgb(42, 45, 51)
+$C_FG   = [System.Drawing.Color]::FromArgb(235, 237, 240)
+$C_MUTED = [System.Drawing.Color]::FromArgb(154, 161, 171)
+$C_ACC  = [System.Drawing.Color]::FromArgb(54, 130, 205)
+$C_ACCH = [System.Drawing.Color]::FromArgb(72, 146, 226)
+$C_BRD  = [System.Drawing.Color]::FromArgb(62, 67, 75)
+$C_CON  = [System.Drawing.Color]::FromArgb(118, 201, 144)
+$C_WARN = [System.Drawing.Color]::FromArgb(236, 176, 82)
+$C_OK   = [System.Drawing.Color]::FromArgb(113, 214, 148)
+$C_PROG = [System.Drawing.Color]::FromArgb(91, 189, 255)
+$C_DANGER = [System.Drawing.Color]::FromArgb(191, 76, 76)
 $FONT_UI  = "Microsoft YaHei"
 $FONT_MONO = "Consolas"
 
@@ -52,6 +54,9 @@ $Script:CancelRequested = $false
 $Script:IsProcessing = $false
 $Script:LastWasProgress = $false
 $Script:ProgressLineStart = 0
+$Script:CurrentFileInfo = ""
+$Script:ActionButtons = @()
+$Script:SecondaryButtons = @()
 
 # ============================================================
 # 4. 工具函数
@@ -89,43 +94,47 @@ function Write-Warn  { param([string]$T) Write-Console $T $C_WARN }
 function Write-Success { param([string]$T) Write-Console $T $C_OK }
 function Clear-Console { $rtb.Clear(); $Script:LastWasProgress = $false }
 
+function Set-ButtonVisual {
+    param(
+        [System.Windows.Forms.Button]$Button,
+        [bool]$Enabled,
+        [bool]$Danger = $false
+    )
+    $Button.Enabled = $Enabled
+    if ($Enabled) {
+        $Button.BackColor = if ($Danger) { $C_DANGER } else { $C_BG3 }
+        $Button.ForeColor = $C_FG
+        $Button.FlatAppearance.BorderColor = if ($Danger) { $C_DANGER } else { $C_BRD }
+    } else {
+        $Button.BackColor = $C_BG2
+        $Button.ForeColor = $C_MUTED
+        $Button.FlatAppearance.BorderColor = $C_BRD
+    }
+}
+
 function Lock-UI {
     $Script:IsProcessing = $true
     $Script:CancelRequested = $false
-    foreach ($c in $form.Controls) {
-        if ($c -is [System.Windows.Forms.Button]) {
-            if ($c.Name -eq "btnCancel") {
-                $c.Enabled = $true
-                $c.BackColor = $C_WARN
-                $c.ForeColor = [System.Drawing.Color]::Black
-            } else {
-                $c.Enabled = $false
-                $c.BackColor = $C_BG
-                $c.ForeColor = $C_BRD
-            }
-        }
+    foreach ($btn in ($Script:ActionButtons + $Script:SecondaryButtons)) {
+        Set-ButtonVisual $btn $false
     }
-    $pnlDrop.BackColor = $C_BG
-    $lblDropHint.Text = "处理中，请稍候... (已锁定拖拽)"
+    if ($btnCancel) { Set-ButtonVisual $btnCancel $true $true }
+    $pnlDrop.BackColor = $C_BG2
+    $lblDropHint.Text = "文件已锁定"
+    $lblFileMeta.ForeColor = $C_WARN
 }
 
 function Unlock-UI {
     $Script:IsProcessing = $false
-    foreach ($c in $form.Controls) {
-        if ($c -is [System.Windows.Forms.Button]) {
-            if ($c.Name -eq "btnCancel") {
-                $c.Enabled = $false
-                $c.BackColor = $C_BG
-                $c.ForeColor = $C_BRD
-            } else {
-                $c.Enabled = $true
-                $c.BackColor = $C_BG3
-                $c.ForeColor = $C_FG
-            }
-        }
+    foreach ($btn in $Script:ActionButtons) {
+        Set-ButtonVisual $btn $true
     }
+    foreach ($btn in $Script:SecondaryButtons) {
+        Set-ButtonVisual $btn $true
+    }
+    if ($btnCancel) { Set-ButtonVisual $btnCancel $false $true }
     $pnlDrop.BackColor = $C_BG2
-    $lblDropHint.Text = "拖拽视频文件到此处"
+    Update-FileLabel
 }
 
 function Show-FileDialog {
@@ -140,10 +149,19 @@ function Show-FileDialog {
 }
 
 function Update-FileLabel {
-    $t1 = if ($Script:CurrentFile) { Split-Path $Script:CurrentFile -Leaf } else { "未选择文件" }
-    $t2 = if ($Script:SecondFile) { "`n对比: " + (Split-Path $Script:SecondFile -Leaf) } else { "" }
-    $lblFile.Text = "文件: $t1$t2"
-    $lblFile.ForeColor = if ($Script:CurrentFile) { $C_OK } else { $C_BRD }
+    if ($Script:CurrentFile) {
+        $lblFileName.Text = Split-Path $Script:CurrentFile -Leaf
+        $meta = if ($Script:CurrentFileInfo) { $Script:CurrentFileInfo } else { "视频参数将在拖入后显示" }
+        if ($Script:SecondFile) { $meta = "$meta    对比: $(Split-Path $Script:SecondFile -Leaf)" }
+        $lblFileMeta.Text = $meta
+        $lblFileName.ForeColor = $C_FG
+        $lblFileMeta.ForeColor = $C_MUTED
+    } else {
+        $lblFileName.Text = "未选择视频文件"
+        $lblFileMeta.Text = "拖入文件后可进行转换、分析、对比或字幕处理"
+        $lblFileName.ForeColor = $C_MUTED
+        $lblFileMeta.ForeColor = $C_MUTED
+    }
 }
 
 function Get-VideoInfo {
@@ -175,7 +193,7 @@ function Invoke-FFmpeg {
     $resultList = New-Object System.Collections.Generic.List[string]
 
     Lock-UI
-    $lblStatus.Text = "  处理中..."
+    $lblStatus.Text = ""
     [System.Windows.Forms.Application]::DoEvents()
     
     $proc = New-Object System.Diagnostics.Process
@@ -186,168 +204,130 @@ function Invoke-FFmpeg {
     $proc.StartInfo.CreateNoWindow = $true
     $proc.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
     
-    try { $proc.Start() | Out-Null } catch { Write-Warn "启动失败: $_"; Unlock-UI; return $resultList }
+    try { $proc.Start() | Out-Null } catch { Write-Warn "启动失败: $_"; Unlock-UI; return $null }
 
     $stderr = $proc.StandardError
-    $baseStream = $stderr.BaseStream
-    $sb = New-Object System.Text.StringBuilder
     $startTime = Get-Date
-    $byteBuf = New-Object byte[] 4096
-    $encoder = [System.Text.Encoding]::UTF8
-    $decoder = $encoder.GetDecoder()
-    $charBuf = New-Object char[] 4096
-    
     $animFrames = @("|", "/", "-", "\")
     $animIndex = 0
-
-    $isRunning = $true
     $lastUpdate = [DateTime]::MinValue
-    $consecutiveTimeouts = 0
+    $readFailed = $false
 
-    while ($isRunning) {
-        [System.Windows.Forms.Application]::DoEvents()
-        
-        if ($proc.HasExited) { $isRunning = $false }
-        
+    while ($true) {
         if ($Script:CancelRequested) {
             Write-Warn "`n[!] 用户取消了任务！正在终止进程..."
             try { $proc.Kill() } catch {}
             break
         }
-        
-        # ---- 非阻塞读取 stderr ----
-        $bytesRead = 0
-        try {
-            $asyncResult = $baseStream.BeginRead($byteBuf, 0, 4096, $null, $null)
-            # 等待最多 2 秒，每 100ms 轮询一次进程/取消状态
-            $readDone = $false
-            for ($w = 0; $w -lt 20; $w++) {
-                if ($asyncResult.AsyncWaitHandle.WaitOne(100)) {
-                    $readDone = $true
-                    break
-                }
-                [System.Windows.Forms.Application]::DoEvents()
-                if ($proc.HasExited) { $isRunning = $false; break }
-                if ($Script:CancelRequested) { break }
-            }
-            if ($readDone) {
-                $bytesRead = $baseStream.EndRead($asyncResult)
-                $consecutiveTimeouts = 0
-            } else {
-                # 2 秒无数据：进程可能卡死，强制关闭管道
-                try { $baseStream.Close() } catch {}
-                $consecutiveTimeouts++
-            }
-        } catch {
-            # 管道关闭或异常，退出读取循环
-            $isRunning = $false
-            $bytesRead = 0
-        }
-        
-        # 超时保护：连续超时 5 次（共 10 秒）或进程已退出 → 强制退出
-        if ($consecutiveTimeouts -ge 5 -or ($proc.HasExited -and $bytesRead -eq 0)) {
-            $isRunning = $false
-        }
-        
-        if ($bytesRead -gt 0) {
-            $charCount = $decoder.GetChars($byteBuf, 0, $bytesRead, $charBuf, 0)
-            for ($i = 0; $i -lt $charCount; $i++) {
-                $c = $charBuf[$i]
-                if ($c -eq [char]13 -or $c -eq [char]10) { 
-                    $line = $sb.ToString().Trim()
-                    $sb.Clear() | Out-Null
-                    if ($line -ne "") {
-                        $resultList.Add($line)
-                        
-                        if ($line -match "time=(\d{2}):(\d{2}):(\d{2}\.\d+)") {
-                            $now = Get-Date
-                            if (($now - $lastUpdate).TotalMilliseconds -gt 100 -or -not $isRunning) {
-                                $lastUpdate = $now
-                                $h = [double]$matches[1]; $m = [double]$matches[2]; $s = [double]$matches[3]
-                                $curSec = $h * 3600 + $m * 60 + $s
-                                
-                                $speedStr = "--"
-                                if ($line -match "speed=\s*([\d\.]+)x") { $speedStr = $matches[1] + "x" }
-                                
-                                $realElapsed = (Get-Date) - $startTime
-                                $elapsedStr = "{0:d2}:{1:d2}:{2:d2}" -f $realElapsed.Hours, $realElapsed.Minutes, $realElapsed.Seconds
-                                
-                                if ($TotalSeconds -gt 0) {
-                                    $percent = ($curSec / $TotalSeconds) * 100
-                                    if ($percent -gt 100) { $percent = 100 }
-                                    
-                                    $remStr = "--:--:--"
-                                    if ($curSec -gt 0 -and $percent -lt 100) {
-                                        $remSec = ($realElapsed.TotalSeconds / $curSec) * ($TotalSeconds - $curSec)
-                                        $remSpan = [TimeSpan]::FromSeconds($remSec)
-                                        $remStr = "{0:d2}:{1:d2}:{2:d2}" -f $remSpan.Hours, $remSpan.Minutes, $remSpan.Seconds
-                                    }
-                                    
-                                    $filled = [math]::Floor(($percent / 100) * 30)
-                                    if ($filled -lt 0) { $filled = 0 }
-                                    if ($filled -gt 30) { $filled = 30 }
-                                    $empty = 30 - $filled
-                                    $bar = ("█" * $filled) + ("░" * $empty)
-                                    
-                                    Write-ProgressLine "▶ [$bar] $([math]::Round($percent,1))% │ 耗时 $elapsedStr │ 剩余 $remStr │ 速度 $speedStr"
-                                } else {
-                                    $anim = $animFrames[$animIndex % 4]
-                                    $animIndex++
-                                    Write-ProgressLine "$anim 处理中... │ 媒体时间 $([math]::Round($curSec,1))s │ 耗时 $elapsedStr │ 速度 $speedStr"
-                                }
-                            }
-                        } elseif ($line -match "error|failed" -and $line -notmatch "showspectrumpic") {
-                            Write-Warn $line
-                        }
-                    }
-                } else {
-                    $sb.Append($c) | Out-Null
-                }
-            }
+
+        # Keep one asynchronous read pending. FFmpeg can be silent for a while
+        # during muxing, so silence must not be treated as a crashed process.
+        $readTask = $stderr.ReadLineAsync()
+        while (-not $readTask.IsCompleted) {
             [System.Windows.Forms.Application]::DoEvents()
-            if ($proc.HasExited) { $isRunning = $false }
-            if ($Script:CancelRequested) { break }
-        } else {
-            # 无数据，稍作等待再检查
+            if ($Script:CancelRequested) {
+                Write-Warn "`n[!] 用户取消了任务！正在终止进程..."
+                try { $proc.Kill() } catch {}
+                break
+            }
             Start-Sleep -Milliseconds 50
         }
+
+        if ($Script:CancelRequested) { break }
+
+        try {
+            $line = $readTask.GetAwaiter().GetResult()
+        } catch {
+            $readFailed = $true
+            Write-Warn "读取 ffmpeg 输出失败: $_"
+            break
+        }
+
+        if ($null -eq $line) { break }
+        $line = $line.Trim()
+        if ($line -eq "") { continue }
+
+        $resultList.Add($line)
+
+        if ($line -match "time=(\d{2}):(\d{2}):(\d{2}\.\d+)") {
+            $now = Get-Date
+            if (($now - $lastUpdate).TotalMilliseconds -gt 100) {
+                $lastUpdate = $now
+                $h = [double]$matches[1]; $m = [double]$matches[2]; $s = [double]$matches[3]
+                $curSec = $h * 3600 + $m * 60 + $s
+
+                $speedStr = "--"
+                if ($line -match "speed=\s*([\d\.]+)x") { $speedStr = $matches[1] + "x" }
+
+                $realElapsed = (Get-Date) - $startTime
+                $elapsedStr = "{0:d2}:{1:d2}:{2:d2}" -f $realElapsed.Hours, $realElapsed.Minutes, $realElapsed.Seconds
+
+                if ($TotalSeconds -gt 0) {
+                    $percent = ($curSec / $TotalSeconds) * 100
+                    if ($percent -gt 100) { $percent = 100 }
+
+                    $remStr = "--:--:--"
+                    if ($curSec -gt 0 -and $percent -lt 100) {
+                        $remSec = ($realElapsed.TotalSeconds / $curSec) * ($TotalSeconds - $curSec)
+                        $remSpan = [TimeSpan]::FromSeconds($remSec)
+                        $remStr = "{0:d2}:{1:d2}:{2:d2}" -f $remSpan.Hours, $remSpan.Minutes, $remSpan.Seconds
+                    }
+
+                    $filled = [math]::Floor(($percent / 100) * 30)
+                    if ($filled -lt 0) { $filled = 0 }
+                    if ($filled -gt 30) { $filled = 30 }
+                    $empty = 30 - $filled
+                    $bar = ("█" * $filled) + ("░" * $empty)
+
+                    Write-ProgressLine "▶ [$bar] $([math]::Round($percent,1))% │ 耗时 $elapsedStr │ 剩余 $remStr │ 速度 $speedStr"
+                } else {
+                    $anim = $animFrames[$animIndex % 4]
+                    $animIndex++
+                    Write-ProgressLine "$anim 处理中... │ 媒体时间 $([math]::Round($curSec,1))s │ 耗时 $elapsedStr │ 速度 $speedStr"
+                }
+            }
+        } elseif ($line -match "error|failed" -and $line -notmatch "showspectrumpic") {
+            Write-Warn $line
+        }
     }
-    
-    # 正常完成时补显示 100% 进度条
-    if (-not $Script:CancelRequested -and $TotalSeconds -gt 0 -and $Script:LastWasProgress) {
+
+    if (-not $proc.HasExited) {
+        try { $proc.WaitForExit() } catch {}
+    }
+    $exitCode = if ($proc.HasExited) { $proc.ExitCode } else { $null }
+    $success = -not $Script:CancelRequested -and -not $readFailed -and $null -ne $exitCode -and $exitCode -eq 0
+
+    # Only report completion after ffmpeg has really exited successfully.
+    if ($success -and $TotalSeconds -gt 0 -and $Script:LastWasProgress) {
         $realElapsed = (Get-Date) - $startTime
         $elapsedStr = "{0:d2}:{1:d2}:{2:d2}" -f $realElapsed.Hours, $realElapsed.Minutes, $realElapsed.Seconds
         $bar = "█" * 30
         Write-ProgressLine "▶ [$bar] 100% │ 耗时 $elapsedStr │ 剩余 00:00:00 │ 完成"
     }
-    
-    if ($sb.Length -gt 0) { $resultList.Add($sb.ToString().Trim()) }
-    
+
     if ($Script:LastWasProgress) {
         $rtb.Select($rtb.TextLength, 0)
         $rtb.AppendText("`r`n")
         $Script:LastWasProgress = $false
     }
-    
-    if (-not $Script:CancelRequested -and $proc.ExitCode -ne 0) {
-        if ($consecutiveTimeouts -ge 5) {
-            Write-Warn "`n[X] 与 ffmpeg 进程的管道连接中断（进程可能已崩溃），任务未能完成"
-        } else {
-            Write-Warn "`n[X] ffmpeg 异常退出 (代码: $($proc.ExitCode))"
-        }
+
+    if (-not $Script:CancelRequested -and -not $success) {
+        $codeText = if ($null -eq $exitCode) { "无法取得退出码" } else { "代码: $exitCode" }
+        Write-Warn "`n[X] ffmpeg 异常退出 ($codeText)"
         $startIdx = [math]::Max(0, $resultList.Count - 15)
         for ($i = $startIdx; $i -lt $resultList.Count; $i++) {
             Write-Console $resultList[$i] $C_BRD
         }
-        $lblStatus.Text = "  准备就绪"
+        $lblStatus.Text = ""
         Unlock-UI
         [System.Windows.Forms.Application]::DoEvents()
         return $null
     }
 
-    $lblStatus.Text = "  准备就绪"
+    $lblStatus.Text = ""
     Unlock-UI
     [System.Windows.Forms.Application]::DoEvents()
+    if ($Script:CancelRequested) { return $null }
     return $resultList
 }
 
@@ -453,41 +433,59 @@ function Convert-Subtitle {
     if ($fontInput) { $fontName = $fontInput }
     
     Write-Info "[嵌入硬字幕]"
-    $tmpDir = [System.IO.Path]::Combine($env:TEMP, "ffmpeg_toolbox_sub")
+    $tmpDir = [System.IO.Path]::Combine($env:TEMP, "ffmpeg_toolbox_sub_" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
-    
-    $ext = [System.IO.Path]::GetExtension($subFile).ToLower()
-    $localSub = [System.IO.Path]::Combine($tmpDir, "subtitle$ext")
-    Copy-Item -LiteralPath $subFile -Destination $localSub -Force
-    
-    if ($ext -eq ".srt") {
-        Write-Info "SRT -> ASS 转换..."
-        $assLocal = [System.IO.Path]::Combine($tmpDir, "subtitle.ass")
-        cmd /c "$ffmpegPath -y -sub_charenc UTF-8 -i `"$localSub`" `"$assLocal`" 2>&1"
-        if (Test-Path -LiteralPath $assLocal) {
+
+    try {
+        $ext = [System.IO.Path]::GetExtension($subFile).ToLower()
+        $localSub = [System.IO.Path]::Combine($tmpDir, "subtitle$ext")
+        Copy-Item -LiteralPath $subFile -Destination $localSub -Force
+
+        if ($ext -eq ".srt") {
+            Write-Info "SRT -> ASS 转换..."
+            $assLocal = [System.IO.Path]::Combine($tmpDir, "subtitle.ass")
+            $convertOutput = & $ffmpegPath -hide_banner -loglevel error -y -sub_charenc UTF-8 -i $localSub $assLocal 2>&1
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $assLocal)) {
+                Write-Warn "SRT 转 ASS 失败，任务已停止"
+                foreach ($line in $convertOutput) { Write-Console $line $C_BRD }
+                return
+            }
             $assContent = Get-Content -LiteralPath $assLocal -Raw -Encoding UTF8
             $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
             Set-Content -LiteralPath $assLocal -Value $assContent -Encoding UTF8
             $localSub = $assLocal
+        } elseif ($ext -eq ".ass") {
+            $assContent = Get-Content -LiteralPath $localSub -Raw -Encoding UTF8
+            $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
+            Set-Content -LiteralPath $localSub -Value $assContent -Encoding UTF8
         }
-    } elseif ($ext -eq ".ass") {
-        $assContent = Get-Content -LiteralPath $localSub -Raw -Encoding UTF8
-        $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
-        Set-Content -LiteralPath $localSub -Value $assContent -Encoding UTF8
+
+        # Keep MP4/MOV-family inputs in a compatible container. Other inputs use
+        # MKV so every source audio track can be copied without a lossy conversion.
+        $videoExt = [System.IO.Path]::GetExtension($VideoPath).ToLower()
+        $outputExt = switch ($videoExt) {
+            ".mp4" { ".mp4" }
+            ".m4v" { ".mp4" }
+            ".mov" { ".mov" }
+            default { ".mkv" }
+        }
+        $outFile = [System.IO.Path]::Combine(
+            [System.IO.Path]::GetDirectoryName($VideoPath),
+            [System.IO.Path]::GetFileNameWithoutExtension($VideoPath) + "_sub" + $outputExt
+        )
+
+        Write-Info "压制字幕 (CRF 16 高质量，兼容像素格式，全部音轨原样复制)..."
+        $escapedSub = $localSub -replace '\\', '/' -replace ':', '\:' -replace "'", "\'"
+        $dur = Get-VideoDuration $VideoPath
+        $arguments = "-y -i `"$VideoPath`" -map 0:v:0 -map 0:a? -map_metadata 0 -map_chapters 0 " +
+                     "-vf `"subtitles='$escapedSub'`" -c:v libx264 -crf 16 -preset slow -pix_fmt yuv420p " +
+                     "-c:a copy `"$outFile`""
+        $res = Invoke-FFmpeg $arguments $dur
+
+        if ($null -ne $res -and -not $Script:CancelRequested) { Write-Success "完成: $outFile" }
+    } finally {
+        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
-    $outFile = [System.IO.Path]::Combine(
-        [System.IO.Path]::GetDirectoryName($VideoPath),
-        [System.IO.Path]::GetFileNameWithoutExtension($VideoPath) + "_sub.mp4"
-    )
-    
-    Write-Info "压制字幕 (CRF18, audio copy)..."
-    $escapedSub = $localSub -replace '\\', '/' -replace ':', '\:' -replace "'", "\'" 
-    $dur = Get-VideoDuration $VideoPath
-    $res = Invoke-FFmpeg "-y -i `"$VideoPath`" -vf `"subtitles='$escapedSub'`" -c:v libx264 -crf 18 -preset slow -c:a copy `"$outFile`"" $dur
-    
-    Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-    if ($null -ne $res -and -not $Script:CancelRequested) { Write-Success "完成: $outFile" }
 }
 
 # ============================================================
@@ -507,7 +505,7 @@ $DWMWA_USE_DARK_MODE = if ([Environment]::OSVersion.Version.Build -ge 22000) { 2
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "ffmpeg 自动工具箱"
-$form.Size = New-Object System.Drawing.Size(760, 620)
+$form.ClientSize = New-Object System.Drawing.Size(920, 680)
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 $form.BackColor = $C_BG
 $form.ForeColor = $C_FG
@@ -516,33 +514,88 @@ $form.AllowDrop = $true
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
 $form.MaximizeBox = $false
 
-# ---- 拖拽区 ----
+function New-UiLabel {
+    param(
+        [System.Windows.Forms.Control]$Parent,
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$W,
+        [int]$H,
+        [System.Drawing.Font]$Font,
+        [System.Drawing.Color]$Color,
+        [System.Drawing.ContentAlignment]$Align = [System.Drawing.ContentAlignment]::MiddleLeft
+    )
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Text
+    $label.AutoSize = $false
+    $label.Location = New-Object System.Drawing.Point($X, $Y)
+    $label.Size = New-Object System.Drawing.Size($W, $H)
+    $label.Font = $Font
+    $label.ForeColor = $Color
+    $label.TextAlign = $Align
+    $label.AutoEllipsis = $true
+    $Parent.Controls.Add($label)
+    return $label
+}
+
+function New-SectionPanel {
+    param([string]$Title, [int]$X, [int]$Y, [int]$W, [int]$H)
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Location = New-Object System.Drawing.Point($X, $Y)
+    $panel.Size = New-Object System.Drawing.Size($W, $H)
+    $panel.BackColor = $C_BG2
+    $panel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $form.Controls.Add($panel)
+    New-UiLabel $panel $Title 16 10 ($W - 32) 22 (New-Object System.Drawing.Font($FONT_UI, 9, [System.Drawing.FontStyle]::Bold)) $C_FG | Out-Null
+    return $panel
+}
+
+function New-UiButton {
+    param(
+        [System.Windows.Forms.Control]$Parent,
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [scriptblock]$Action,
+        [int]$W = 170,
+        [int]$H = 34,
+        [ValidateSet("Action", "Secondary", "Danger")][string]$Kind = "Action"
+    )
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = $Text
+    $btn.Location = New-Object System.Drawing.Point($X, $Y)
+    $btn.Size = New-Object System.Drawing.Size($W, $H)
+    $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btn.BackColor = if ($Kind -eq "Danger") { $C_BG2 } else { $C_BG3 }
+    $btn.ForeColor = if ($Kind -eq "Danger") { $C_MUTED } else { $C_FG }
+    $btn.Font = New-Object System.Drawing.Font($FONT_UI, 9)
+    $btn.FlatAppearance.BorderColor = $C_BRD
+    $btn.FlatAppearance.MouseOverBackColor = if ($Kind -eq "Danger") { $C_DANGER } else { $C_ACCH }
+    $btn.FlatAppearance.MouseDownBackColor = if ($Kind -eq "Danger") { $C_DANGER } else { $C_ACC }
+    $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $btn.Add_Click($Action)
+    $Parent.Controls.Add($btn)
+    if ($Kind -eq "Action") { $Script:ActionButtons += $btn } else { $Script:SecondaryButtons += $btn }
+    return $btn
+}
+
+# ---- 顶部标题 ----
+New-UiLabel $form "ffmpeg 自动工具箱" 24 16 360 30 (New-Object System.Drawing.Font($FONT_UI, 15, [System.Drawing.FontStyle]::Bold)) $C_FG | Out-Null
+New-UiLabel $form "视频转换、质量检查、频谱分析、硬字幕压制" 26 48 520 22 (New-Object System.Drawing.Font($FONT_UI, 9)) $C_MUTED | Out-Null
+
+# ---- 文件工作区 ----
 $pnlDrop = New-Object System.Windows.Forms.Panel
-$pnlDrop.Size = New-Object System.Drawing.Size(720, 60)
-$pnlDrop.Location = New-Object System.Drawing.Point(15, 12)
+$pnlDrop.Size = New-Object System.Drawing.Size(872, 98)
+$pnlDrop.Location = New-Object System.Drawing.Point(24, 84)
 $pnlDrop.BackColor = $C_BG2
 $pnlDrop.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 $pnlDrop.AllowDrop = $true
-
-$lblDropHint = New-Object System.Windows.Forms.Label
-$lblDropHint.Text = "拖拽视频文件到此处"
-$lblDropHint.AutoSize = $false
-$lblDropHint.Dock = [System.Windows.Forms.DockStyle]::Fill
-$lblDropHint.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$lblDropHint.ForeColor = $C_BRD
-$lblDropHint.Font = New-Object System.Drawing.Font($FONT_UI, 10)
-$pnlDrop.Controls.Add($lblDropHint)
-
 $form.Controls.Add($pnlDrop)
 
-# 文件信息标签
-$lblFile = New-Object System.Windows.Forms.Label
-$lblFile.Location = New-Object System.Drawing.Point(15, 78)
-$lblFile.Size = New-Object System.Drawing.Size(720, 36)
-$lblFile.ForeColor = $C_BRD
-$lblFile.Font = New-Object System.Drawing.Font($FONT_UI, 9)
-$lblFile.Text = "文件: 未选择"
-$form.Controls.Add($lblFile)
+$lblDropHint = New-UiLabel $pnlDrop "当前文件" 20 14 180 22 (New-Object System.Drawing.Font($FONT_UI, 9, [System.Drawing.FontStyle]::Bold)) $C_FG
+$lblFileName = New-UiLabel $pnlDrop "未选择视频文件" 20 38 810 28 (New-Object System.Drawing.Font($FONT_UI, 12, [System.Drawing.FontStyle]::Bold)) $C_MUTED
+$lblFileMeta = New-UiLabel $pnlDrop "拖入文件后可进行转换、分析、对比或字幕处理" 20 68 810 20 (New-Object System.Drawing.Font($FONT_UI, 9)) $C_MUTED
 
 # 拖拽事件
 function Invoke-Drop {
@@ -550,17 +603,9 @@ function Invoke-Drop {
     $files = $_.Data.GetData([System.Windows.Forms.DataFormats]::FileDrop)
     if ($files.Count -gt 0) {
         $Script:CurrentFile = $files[0]
-        if ($files.Count -gt 1) {
-            $Script:SecondFile = $files[1]
-        }
-        $info = Get-VideoInfo $Script:CurrentFile
-        if ($info) {
-            $t2 = if ($Script:SecondFile) { "`n对比: " + (Split-Path $Script:SecondFile -Leaf) } else { "" }
-            $lblFile.Text = "文件: $(Split-Path $Script:CurrentFile -Leaf)  |  $info$t2"
-            $lblFile.ForeColor = $C_OK
-        } else {
-            Update-FileLabel
-        }
+        $Script:SecondFile = if ($files.Count -gt 1) { $files[1] } else { "" }
+        $Script:CurrentFileInfo = Get-VideoInfo $Script:CurrentFile
+        Update-FileLabel
     }
 }
 
@@ -569,104 +614,61 @@ $pnlDrop.Add_DragDrop({ Invoke-Drop })
 $form.Add_DragEnter({ $_.Effect = [System.Windows.Forms.DragDropEffects]::Copy })
 $form.Add_DragDrop({ Invoke-Drop })
 
-# ---- 功能按钮 ----
-function New-Btn {
-    param([string]$Text, [int]$X, [int]$Y, [scriptblock]$Action, [int]$W = 170, [int]$H = 34)
-    $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = $Text
-    $btn.Location = New-Object System.Drawing.Point($X, $Y)
-    $btn.Size = New-Object System.Drawing.Size($W, $H)
-    $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $btn.BackColor = $C_BG3
-    $btn.ForeColor = $C_FG
-    $btn.Font = New-Object System.Drawing.Font($FONT_UI, 9)
-    $btn.FlatAppearance.BorderColor = $C_BRD
-    $btn.FlatAppearance.MouseOverBackColor = $C_ACCH
-    $btn.FlatAppearance.MouseDownBackColor = $C_ACC
-    $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $btn.Add_Click($Action)
-    $form.Controls.Add($btn)
-}
+# ---- 功能分组 ----
+$grpConvert = New-SectionPanel "格式转换" 24 202 424 92
+New-UiButton $grpConvert "低损耗 MP4" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-LowLoss $Script:CurrentFile } 188 34 | Out-Null
+New-UiButton $grpConvert "普通 MP4" 220 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Normal $Script:CurrentFile } 188 34 | Out-Null
 
-$btnY = 120
+$grpInspect = New-SectionPanel "媒体分析" 472 202 424 92
+New-UiButton $grpInspect "参数核对" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Test-Probe $Script:CurrentFile } 188 34 | Out-Null
+New-UiButton $grpInspect "生成频谱" 220 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; New-Spectrum $Script:CurrentFile } 188 34 | Out-Null
 
-New-Btn "1. 格式转换 (低损耗)"     16    $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-LowLoss    $Script:CurrentFile }
-New-Btn "2. 格式转换 (普通)"       202   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Normal     $Script:CurrentFile }
-New-Btn "3. 核对参数"              388   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Test-Probe         $Script:CurrentFile }
-New-Btn "4. 生成频谱"              574   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; New-Spectrum       $Script:CurrentFile }
+$grpCompare = New-SectionPanel "质量对比" 24 310 584 92
+New-UiButton $grpCompare "SSIM 对比" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-SSIM $Script:CurrentFile $Script:SecondFile } 170 34 | Out-Null
+New-UiButton $grpCompare "差值图" 202 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Diff $Script:CurrentFile $Script:SecondFile } 170 34 | Out-Null
+New-UiButton $grpCompare "质量报告" 388 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Quality $Script:CurrentFile $Script:SecondFile } 176 34 | Out-Null
 
-$btnY += 42
-New-Btn "5. SSIM 对比"              16    $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-SSIM $Script:CurrentFile $Script:SecondFile }
-New-Btn "6. 差值图"                202   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Diff $Script:CurrentFile $Script:SecondFile }
-New-Btn "7. 质量对比 (分值+图)"    388   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Quality $Script:CurrentFile $Script:SecondFile }
-New-Btn "8. 嵌入硬字幕"            574   $btnY         { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Subtitle   $Script:CurrentFile }
+$grpSubtitle = New-SectionPanel "字幕处理" 632 310 264 92
+New-UiButton $grpSubtitle "嵌入硬字幕" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Subtitle $Script:CurrentFile } 232 34 | Out-Null
 
-$btnY += 42
-
-$btnClearSecond = New-Object System.Windows.Forms.Button
-$btnClearSecond.Text = "清除对比文件"
-$btnClearSecond.Location = New-Object System.Drawing.Point(15, $btnY)
-$btnClearSecond.Size = New-Object System.Drawing.Size(170, 26)
-$btnClearSecond.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnClearSecond.BackColor = $C_BG3
-$btnClearSecond.ForeColor = $C_FG
-$btnClearSecond.FlatAppearance.BorderColor = $C_BRD
-$btnClearSecond.Font = New-Object System.Drawing.Font($FONT_UI, 8)
-$btnClearSecond.Cursor = [System.Windows.Forms.Cursors]::Hand
-$btnClearSecond.Add_Click({
+# ---- 辅助操作 ----
+$btnClearSecond = New-UiButton $form "清除对比文件" 24 418 {
     $Script:SecondFile = ""
     Update-FileLabel
     Write-Info "对比文件已清除"
-})
-$form.Controls.Add($btnClearSecond)
+} 160 30 "Secondary"
 
-$btnCancel = New-Object System.Windows.Forms.Button
-$btnCancel.Name = "btnCancel"
-$btnCancel.Text = "取消当前任务"
-$btnCancel.Location = New-Object System.Drawing.Point(202, $btnY)
-$btnCancel.Size = New-Object System.Drawing.Size(170, 26)
-$btnCancel.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnCancel.BackColor = $C_BG
-$btnCancel.ForeColor = $C_BRD
-$btnCancel.FlatAppearance.BorderColor = $C_BRD
-$btnCancel.Font = New-Object System.Drawing.Font($FONT_UI, 8)
-$btnCancel.Cursor = [System.Windows.Forms.Cursors]::Hand
-$btnCancel.Enabled = $false
-$btnCancel.Add_Click({
+$btnCancel = New-UiButton $form "取消当前任务" 198 418 {
     $Script:CancelRequested = $true
-})
-$form.Controls.Add($btnCancel)
-
+} 160 30 "Danger"
+$btnCancel.Name = "btnCancel"
+Set-ButtonVisual $btnCancel $false $true
 
 # ---- 控制台输出 ----
-$rtbY = $btnY + 40
+$pnlLog = New-Object System.Windows.Forms.Panel
+$pnlLog.Location = New-Object System.Drawing.Point(24, 464)
+$pnlLog.Size = New-Object System.Drawing.Size(872, 192)
+$pnlLog.BackColor = $C_BG2
+$pnlLog.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$form.Controls.Add($pnlLog)
+
+New-UiLabel $pnlLog "任务日志" 16 10 180 22 (New-Object System.Drawing.Font($FONT_UI, 9, [System.Drawing.FontStyle]::Bold)) $C_FG | Out-Null
+
 $rtb = New-Object System.Windows.Forms.RichTextBox
-$rtb.Location = New-Object System.Drawing.Point(15, $rtbY)
-$rtb.Size = New-Object System.Drawing.Size(720, 200)
-$rtb.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 20)
+$rtb.Location = New-Object System.Drawing.Point(16, 40)
+$rtb.Size = New-Object System.Drawing.Size(840, 136)
+$rtb.BackColor = [System.Drawing.Color]::FromArgb(12, 13, 15)
 $rtb.ForeColor = $C_CON
 $rtb.Font = New-Object System.Drawing.Font($FONT_MONO, 9)
 $rtb.ReadOnly = $true
 $rtb.BorderStyle = [System.Windows.Forms.BorderStyle]::None
 $rtb.WordWrap = $false
-$form.Controls.Add($rtb)
+$pnlLog.Controls.Add($rtb)
 
-# ---- 底部状态栏 ----
-$pnlStatus = New-Object System.Windows.Forms.Panel
-$pnlStatus.Size = New-Object System.Drawing.Size(760, 22)
-$pnlStatus.Location = New-Object System.Drawing.Point(0, ([int]$form.ClientSize.Height - 22))
-$pnlStatus.BackColor = $C_BG2
-$pnlStatus.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
-
+# 保留隐藏状态标签，避免任务函数里的状态赋值影响界面。
 $lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Text = "  准备就绪"
-$lblStatus.AutoSize = $true
-$lblStatus.Location = New-Object System.Drawing.Point(4, 3)
-$lblStatus.ForeColor = $C_FG
-$lblStatus.Font = New-Object System.Drawing.Font($FONT_UI, 8)
-$pnlStatus.Controls.Add($lblStatus)
-$form.Controls.Add($pnlStatus)
-
+$lblStatus.Text = ""
+$lblStatus.Visible = $false
 # ============================================================
 # 7. 入口
 # ============================================================
@@ -677,7 +679,7 @@ if ($File1 -and (Test-Path -LiteralPath $File1)) {
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 Update-FileLabel
-Write-Info "ffmpeg 自动工具箱 GUI 已就绪"
+
 
 # 标题栏暗色 (Shown 事件触发)
 $form.Add_Shown({
