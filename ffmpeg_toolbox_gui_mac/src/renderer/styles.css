@@ -1,0 +1,281 @@
+:root {
+  color-scheme: dark;
+  --bg: #141518;
+  --panel: #202226;
+  --panel-2: #282b31;
+  --border: #3c4149;
+  --text: #ebedf0;
+  --muted: #9aa1ab;
+  --accent: #3d8bd6;
+  --accent-2: #64c987;
+  --warn: #ecb052;
+  --danger: #bf4c4c;
+  --console: #0c0d0f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 920px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0 16px;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #303b47;
+}
+
+button:disabled {
+  color: #6f7680;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.secondary-button {
+  background: transparent;
+}
+
+.danger-button {
+  border-color: #6f3636;
+  background: #3a2022;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 18px;
+  min-height: 100vh;
+  padding: 28px 28px 24px;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding-left: 72px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.titlebar p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace,
+.task-area,
+.tool-panel,
+.drop-zone {
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workspace {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 104px;
+  padding: 18px 20px;
+  background: #1e2025;
+}
+
+.drop-zone.dragging {
+  border-color: var(--accent);
+  background: #202936;
+}
+
+.drop-copy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#primaryName {
+  overflow: hidden;
+  max-width: 700px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+}
+
+#fileMeta {
+  overflow: hidden;
+  max-width: 700px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drop-actions,
+.button-row,
+.task-actions,
+.subtitle-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.tool-panel {
+  display: grid;
+  gap: 18px;
+  min-height: 104px;
+  padding: 16px;
+}
+
+.tool-panel.wide {
+  grid-column: span 1;
+}
+
+.button-row button {
+  flex: 1;
+  min-width: 0;
+}
+
+.button-row.three button {
+  padding-inline: 10px;
+}
+
+.subtitle-controls input {
+  width: 180px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #17191d;
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.task-area {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-height: 270px;
+  padding: 16px;
+}
+
+.task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.progress-wrap {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.progress-track {
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid #2e343b;
+  border-radius: 999px;
+  background: #101114;
+}
+
+.progress-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 120ms ease;
+}
+
+#progressText {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  text-align: right;
+}
+
+#logBox {
+  min-height: 150px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #1f242a;
+  border-radius: 6px;
+  background: var(--console);
+  color: #76c990;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
+.log-info {
+  color: #d7dde5;
+}
+
+.log-warn {
+  color: var(--warn);
+}
+
+.log-error {
+  color: #ff8d8d;
+}
+
+.log-success {
+  color: var(--accent-2);
+}

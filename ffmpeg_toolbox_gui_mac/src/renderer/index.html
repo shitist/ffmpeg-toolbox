@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ffmpeg 自动工具箱</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="titlebar">
+        <div>
+          <h1>ffmpeg 自动工具箱</h1>
+          <p id="dependencyStatus">检测 ffmpeg / ffprobe ...</p>
+        </div>
+        <button class="secondary-button" id="refreshStatusButton" type="button">刷新</button>
+      </header>
+
+      <section class="workspace">
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-copy">
+            <span class="eyebrow">当前文件</span>
+            <strong id="primaryName">未选择视频文件</strong>
+            <small id="fileMeta">拖入或选择视频文件</small>
+          </div>
+          <div class="drop-actions">
+            <button id="chooseFileButton" type="button">选择文件</button>
+            <button class="secondary-button" id="clearSecondButton" type="button">清除对比</button>
+          </div>
+        </div>
+
+        <div class="panel-grid">
+          <section class="tool-panel">
+            <h2>格式转换</h2>
+            <div class="button-row">
+              <button data-action="convertLowLoss" type="button">低损耗 MP4</button>
+              <button data-action="convertNormal" type="button">普通 MP4</button>
+            </div>
+          </section>
+
+          <section class="tool-panel">
+            <h2>媒体分析</h2>
+            <div class="button-row">
+              <button data-action="probe" type="button">参数核对</button>
+              <button data-action="spectrum" type="button">生成频谱</button>
+            </div>
+          </section>
+
+          <section class="tool-panel wide">
+            <h2>质量对比</h2>
+            <div class="button-row three">
+              <button data-action="ssim" type="button">SSIM 对比</button>
+              <button data-action="diff" type="button">差值图</button>
+              <button data-action="quality" type="button">质量报告</button>
+            </div>
+          </section>
+
+          <section class="tool-panel">
+            <h2>字幕处理</h2>
+            <div class="subtitle-controls">
+              <button data-action="subtitle" type="button">嵌入硬字幕</button>
+              <input id="fontNameInput" type="text" value="Microsoft YaHei" spellcheck="false" />
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="task-area">
+        <div class="task-header">
+          <h2>任务日志</h2>
+          <div class="task-actions">
+            <button class="secondary-button" id="revealOutputButton" type="button" disabled>打开输出</button>
+            <button class="danger-button" id="cancelButton" type="button" disabled>取消当前任务</button>
+          </div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <span id="progressText">空闲</span>
+        </div>
+        <pre id="logBox"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

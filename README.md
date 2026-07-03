@@ -1,7 +1,7 @@
 # ffmpeg-toolbox
 
-> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看等功能。  
-> An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection and more.
+> 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看、频谱图、硬字幕等功能。
+> An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection, spectrum images, hard subtitles and more.
 
 ![version](https://img.shields.io/badge/version-v2.0.1-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -24,6 +24,39 @@
 
 ## 使用方法 / Usage
 
+### Windows GUI
+
+双击运行 `ffmpeg_toolbox_gui.exe`，拖入视频文件后点击功能按钮即可。
+Double-click `ffmpeg_toolbox_gui.exe`, drag in a video file, then click an action button.
+
+- 拖拽视频到窗口自动显示分辨率/帧率/码率
+- 功能按钮一键运行，内嵌控制台实时输出
+- 实时进度条（百分比 + 耗时 + 剩余时间 + 编码速度）
+- 支持中途取消任务，崩溃自动恢复并报错
+- 对比和字幕功能自动弹出文件选择框
+
+### macOS GUI
+
+macOS GUI 位于 `ffmpeg_toolbox_gui_mac/`，是一套独立的 Electron 应用工程，已包含 GUI 和 ffmpeg/ffprobe 调用逻辑。
+The macOS GUI lives in `ffmpeg_toolbox_gui_mac/`. It is a standalone Electron app containing both the GUI and ffmpeg/ffprobe task logic.
+
+源码运行 / Run from source:
+
+```sh
+cd ffmpeg_toolbox_gui_mac
+npm install
+npm start
+```
+
+打包 macOS 应用 / Build a macOS app:
+
+```sh
+npm run build:mac
+```
+
+公开分发 `.app` / `.dmg` 时，建议进行 Apple 代码签名和 notarization。
+For public `.app` / `.dmg` distribution, Apple code signing and notarization are recommended.
+
 ### 交互菜单 / Interactive Menu
 双击运行 `ffmpeg自动工具箱.exe` 或 `ffmpeg自动工具箱.bat`，在菜单中选择功能编号即可。  
 Double-click `ffmpeg自动工具箱.exe` or `ffmpeg自动工具箱.bat`, then select a function by number.
@@ -37,37 +70,45 @@ You can also drag two files at once for comparison (SSIM, diff, quality) or vide
 
 ---
 
-## GUI
-
-`ffmpeg_toolbox_gui.exe` — 图形界面，拖拽即用。  
-`ffmpeg_toolbox_gui.exe` — Graphical interface, drag and drop ready.
-
-- 拖拽视频到窗口自动显示分辨率/帧率/码率
-- 功能按钮一键运行，内嵌控制台实时输出
-- 实时进度条（百分比 + 耗时 + 剩余时间 + 编码速度）
-- 支持中途取消任务，崩溃自动恢复并报错
-- 对比和字幕功能自动弹出文件选择框
-
----
-
 ## 依赖 / Requirements
 
 - **ffmpeg** (含 ffprobe) — 下载: [ffmpeg.org](https://ffmpeg.org/download.html)
-- **Windows** (PowerShell 5.1+)
+- **Windows GUI / CLI**: Windows, PowerShell 5.1+
+- **macOS GUI**: macOS, Node.js, npm
 
-首次启动时，工具会自动检测系统 PATH 中的 ffmpeg。如果未找到，会提示手动输入路径。  
-On first launch, the tool auto-detects ffmpeg from your system PATH. If not found, you will be prompted to enter the path manually.
+启动时，工具会从系统 PATH 检测 ffmpeg。Windows CLI 可在未找到时手动输入路径；macOS GUI 需要 ffmpeg 和 ffprobe 已在 PATH 中。
+On launch, the tool checks for ffmpeg from your system PATH. Windows CLI can prompt for a manual path; the macOS GUI expects ffmpeg and ffprobe to be available in PATH.
 
 ---
 
 ## 安装 / Installation
 
+### Windows
+
 1. 从 [Releases](https://github.com/shitist/ffmpeg-toolbox/releases) 下载最新版本，或者直接克隆仓库。  
    Download the latest release from [Releases](https://github.com/shitist/ffmpeg-toolbox/releases), or clone the repository directly.
 2. 确保 ffmpeg 已安装并配置到系统 PATH 中。  
    Make sure ffmpeg is installed and added to your system PATH.
-3. 运行 `ffmpeg自动工具箱.exe` 即可。  
-   Run `ffmpeg自动工具箱.exe` to start.
+3. 运行 `ffmpeg_toolbox_gui.exe` 或 `ffmpeg自动工具箱.exe`。
+   Run `ffmpeg_toolbox_gui.exe` or `ffmpeg自动工具箱.exe`.
+
+### macOS
+
+1. 安装 ffmpeg。
+   Install ffmpeg.
+
+   ```sh
+   brew install ffmpeg
+   ```
+
+2. 安装并启动 Mac GUI。
+   Install and start the Mac GUI.
+
+   ```sh
+   cd ffmpeg_toolbox_gui_mac
+   npm install
+   npm start
+   ```
 
 ---
 
@@ -77,6 +118,11 @@ On first launch, the tool auto-detects ffmpeg from your system PATH. If not foun
 ffmpeg-toolbox/
 ├── ffmpeg_toolbox.ps1          # 主脚本 (PowerShell CLI) / Main script (CLI)
 ├── ffmpeg_toolbox_gui.ps1      # GUI 脚本 (PowerShell) / GUI script
+├── ffmpeg_toolbox_gui_mac/     # macOS GUI (Electron)
+│   ├── package.json            # npm scripts and Electron config
+│   ├── package-lock.json       # locked npm dependencies
+│   ├── README.md               # macOS GUI notes
+│   └── src/                    # Electron main/preload/renderer source
 ├── ffmpeg自动工具箱.bat         # 批处理启动器 / Batch launcher
 ├── ffmpeg自动工具箱.exe         # CLI 打包可执行文件 / Packaged CLI executable
 ├── ffmpeg_toolbox_gui.exe      # GUI 打包可执行文件 / Packaged GUI executable
