@@ -3,7 +3,7 @@
 > 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看、频谱图、硬字幕等功能。
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection, spectrum images, hard subtitles and more.
 
-![version](https://img.shields.io/badge/version-v2.0.1-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![version](https://img.shields.io/badge/version-v2.1.0-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
