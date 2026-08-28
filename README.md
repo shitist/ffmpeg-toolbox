@@ -34,13 +34,11 @@ Double-click `ffmpeg_toolbox_gui.exe`, drag in a video file, then click an actio
 - 实时进度条（百分比 + 耗时 + 剩余时间 + 编码速度）
 - 支持中途取消任务，崩溃自动恢复并报错
 - 对比和字幕功能自动弹出文件选择框
-- 字幕字体提供 Noto Sans 中文（默认）、Noto Sans 日文，以及本机已安装时的微软雅黑；内置静态常规体和粗体，无需安装字体或调整字重
-- 字体预览由 ffmpeg 渲染所选视频中第一条字幕的画面，预览与最终压制使用相同的字体和样式处理
-- SRT 的 Noto 默认字号按旧版雅黑的视觉大小作 1.1 倍补偿；ASS 只替换 Default 样式字体，保留字号、加粗、定位、其他样式及内联标记
+- 支持 Noto Sans 中文、Noto Sans 日文和微软雅黑，默认使用 Noto Sans 中文
+- 压制前可预览所选字体在视频中的实际字幕效果
+- 支持 SRT、ASS 字幕，保留 ASS 原有的字号、粗细和位置设置
 
-已有硬字幕不会自动去重或移除；更换字体请使用未烧入该字幕的源视频重新压制。
-
-Windows GUI EXE 内嵌 Noto 字体资源，运行时写入 `%LOCALAPPDATA%\ffmpeg-toolbox\fonts\noto-cjk-2.004`，不修改系统字体。字体遵循 [SIL OFL 1.1](assets/fonts/OFL.txt)，来源及校验值见 [字体说明](assets/fonts/FONT-NOTICE.txt)。
+内置 Noto 字体，无需另行安装。字体遵循 [SIL OFL 1.1](assets/fonts/OFL.txt)，详见 [字体说明](assets/fonts/FONT-NOTICE.txt)。
 
 从源码运行 Windows GUI 时需保留 `assets/fonts`。已安装 `ps2exe` 的 Windows PowerShell 中可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\build_gui.ps1`，重建包含字体的 EXE。
 
@@ -48,6 +46,8 @@ Windows GUI EXE 内嵌 Noto 字体资源，运行时写入 `%LOCALAPPDATA%\ffmpe
 
 macOS GUI 位于 `ffmpeg_toolbox_gui_mac/`，是一套独立的 Electron 应用工程，已包含 GUI 和 ffmpeg/ffprobe 调用逻辑。
 The macOS GUI lives in `ffmpeg_toolbox_gui_mac/`. It is a standalone Electron app containing both the GUI and ffmpeg/ffprobe task logic.
+
+macOS 版尚未支持内置字体下拉选择和字幕效果预览。
 
 源码运行 / Run from source:
 
