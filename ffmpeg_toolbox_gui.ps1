@@ -8,7 +8,6 @@ param(
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName Microsoft.VisualBasic
 
 # ============================================================
 # 1. ffmpeg / ffprobe 检测
@@ -57,6 +56,11 @@ $Script:ProgressLineStart = 0
 $Script:CurrentFileInfo = ""
 $Script:ActionButtons = @()
 $Script:SecondaryButtons = @()
+$Script:SubtitleFontsPath = if ($PSScriptRoot) {
+    Join-Path $PSScriptRoot "assets\fonts\noto-cjk"
+} else {
+    Join-Path $env:LOCALAPPDATA "ffmpeg-toolbox\fonts\noto-cjk-2.004\fonts"
+}
 
 # ============================================================
 # 4. 工具函数
@@ -146,6 +150,127 @@ function Show-FileDialog {
         return $dlg.FileName
     }
     return ""
+}
+
+function Get-SubtitleFontPresets {
+    foreach ($name in @("NotoSansCJK-Regular.ttc", "NotoSansCJK-Bold.ttc")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Script:SubtitleFontsPath $name))) {
+            throw "内置字幕字体缺失: $name"
+        }
+    }
+    [pscustomobject]@{ DisplayName = "Noto Sans 中文（默认）"; FontName = "Noto Sans CJK SC"; SrtScale = 1.1 }
+    [pscustomobject]@{ DisplayName = "Noto Sans 日文"; FontName = "Noto Sans CJK JP"; SrtScale = 1.1 }
+    $fontCollection = New-Object System.Drawing.Text.InstalledFontCollection
+    try {
+        if ($fontCollection.Families.Name -contains "Microsoft YaHei") {
+            [pscustomobject]@{ DisplayName = "微软雅黑"; FontName = "Microsoft YaHei"; SrtScale = 1.0 }
+        }
+    } finally {
+        $fontCollection.Dispose()
+    }
+}
+
+function Set-SubtitleFont {
+    param([string]$Content, $Preset, [bool]$PlainText)
+    $inStyles = $false
+    $columns = @()
+    $lines = [regex]::Split($Content, '(?<=\n)')
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $line = $lines[$i]
+        if ($line -match '^\s*\[([^\]]+)\]') {
+            $inStyles = $matches[1] -eq 'V4+ Styles'
+            $columns = @()
+        } elseif ($inStyles -and $line -match '^Format:\s*([^\r\n]+)') {
+            $columns = @($matches[1].Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() })
+        } elseif ($inStyles -and $columns.Count -gt 0 -and $line -match '^(Style:\s*)([^\r\n]+)(\r?\n)?$') {
+            $prefix = $matches[1]
+            $fields = $matches[2].Split(',')
+            $ending = $matches[3]
+            $nameIndex = [Array]::IndexOf($columns, 'name')
+            $fontIndex = [Array]::IndexOf($columns, 'fontname')
+            if ($fields.Count -ne $columns.Count -or $nameIndex -lt 0 -or $fontIndex -lt 0) { continue }
+            if ($fields[$nameIndex].Trim() -ne 'Default') { continue }
+            $fields[$fontIndex] = $Preset.FontName
+            $sizeIndex = [Array]::IndexOf($columns, 'fontsize')
+            if ($PlainText -and $sizeIndex -ge 0) {
+                $size = 0.0
+                if ([double]::TryParse($fields[$sizeIndex], [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$size)) {
+                    $fields[$sizeIndex] = ($size * $Preset.SrtScale).ToString('0.###', [System.Globalization.CultureInfo]::InvariantCulture)
+                }
+            }
+            $lines[$i] = $prefix + ($fields -join ',') + $ending
+        }
+    }
+    return $lines -join ''
+}
+
+function Get-SubtitlePreviewTime {
+    param([string]$Content)
+    $inEvents = $false
+    $columns = @()
+    foreach ($line in ($Content -split '\r?\n')) {
+        if ($line -match '^\s*\[([^\]]+)\]') {
+            $inEvents = $matches[1] -eq 'Events'
+            $columns = @()
+        } elseif ($inEvents -and $line -match '^Format:\s*(.+)') {
+            $columns = @($matches[1].Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() })
+        } elseif ($inEvents -and $columns.Count -gt 0 -and $line -match '^Dialogue:\s*(.+)') {
+            $fields = $matches[1].Split([char[]]@(','), $columns.Count)
+            $startIndex = [Array]::IndexOf($columns, 'start')
+            $endIndex = [Array]::IndexOf($columns, 'end')
+            $textIndex = [Array]::IndexOf($columns, 'text')
+            if ($fields.Count -ne $columns.Count -or $startIndex -lt 0 -or $endIndex -lt 0 -or $textIndex -lt 0) { continue }
+            if ([string]::IsNullOrWhiteSpace(($fields[$textIndex] -replace '\{[^}]*\}', ''))) { continue }
+            $start = [TimeSpan]::Zero
+            $end = [TimeSpan]::Zero
+            if ([TimeSpan]::TryParse($fields[$startIndex], [System.Globalization.CultureInfo]::InvariantCulture, [ref]$start) -and
+                [TimeSpan]::TryParse($fields[$endIndex], [System.Globalization.CultureInfo]::InvariantCulture, [ref]$end) -and $end -gt $start) {
+                return [math]::Max(0.0, $start.TotalSeconds + [math]::Min(0.5, ($end - $start).TotalSeconds / 2))
+            }
+        }
+    }
+    return $null
+}
+
+function ConvertTo-SubtitleFilterPath {
+    param([string]$Path)
+    # Escape the option value, then the surrounding filter-graph token.
+    $value = $Path.Replace('\', '/').Replace(':', '\:').Replace("'", "\'")
+    return "'" + $value.Replace("'", "'\''") + "'"
+}
+
+function Get-SubtitleFilter {
+    param([string]$Path)
+    return "subtitles=filename=$(ConvertTo-SubtitleFilterPath $Path):fontsdir=$(ConvertTo-SubtitleFilterPath $Script:SubtitleFontsPath)"
+}
+
+function Start-SubtitlePreview {
+    param([string]$VideoPath, [string]$SubtitlePath, [string]$ImagePath, [double]$Time)
+    $seconds = $Time.ToString('0.###', [System.Globalization.CultureInfo]::InvariantCulture)
+    $filter = "setpts=PTS+$seconds/TB,$(Get-SubtitleFilter $SubtitlePath),scale=464:260:force_original_aspect_ratio=decrease,pad=464:260:(ow-iw)/2:(oh-ih)/2:color=0x0c0d0f"
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo.FileName = $ffmpegPath
+    $proc.StartInfo.Arguments = "-nostdin -hide_banner -y -ss $seconds -i `"$VideoPath`" -vf `"$filter`" -frames:v 1 -an -sn -c:v png -threads 1 -update 1 `"$ImagePath`""
+    $proc.StartInfo.UseShellExecute = $false
+    $proc.StartInfo.CreateNoWindow = $true
+    $proc.StartInfo.RedirectStandardError = $true
+    $proc.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    try {
+        $proc.Start() | Out-Null
+        return [pscustomobject]@{ Process = $proc; ErrorTask = $proc.StandardError.ReadToEndAsync(); Started = [DateTime]::UtcNow; ImagePath = $ImagePath }
+    } catch {
+        $proc.Dispose()
+        throw
+    }
+}
+
+function Stop-SubtitlePreview {
+    param($Job)
+    if (-not $Job) { return }
+    try {
+        if (-not $Job.Process.HasExited) { $Job.Process.Kill() }
+        $Job.Process.WaitForExit()
+    } finally { $Job.Process.Dispose() }
 }
 
 function Update-FileLabel {
@@ -428,11 +553,6 @@ function Convert-Subtitle {
     $subFile = Show-FileDialog "选择字幕文件" "字幕文件|*.srt;*.ass|所有文件|*.*"
     if (-not $subFile) { return }
     
-    $fontName = "Microsoft YaHei"
-    $fontInput = [Microsoft.VisualBasic.Interaction]::InputBox("请输入字体名称", "字体设置", "Microsoft YaHei")
-    if ($fontInput) { $fontName = $fontInput }
-    
-    Write-Info "[嵌入硬字幕]"
     $tmpDir = [System.IO.Path]::Combine($env:TEMP, "ffmpeg_toolbox_sub_" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 
@@ -450,15 +570,14 @@ function Convert-Subtitle {
                 foreach ($line in $convertOutput) { Write-Console $line $C_BRD }
                 return
             }
-            $assContent = Get-Content -LiteralPath $assLocal -Raw -Encoding UTF8
-            $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
-            Set-Content -LiteralPath $assLocal -Value $assContent -Encoding UTF8
             $localSub = $assLocal
-        } elseif ($ext -eq ".ass") {
-            $assContent = Get-Content -LiteralPath $localSub -Raw -Encoding UTF8
-            $assContent = $assContent -replace '(?<=Style: Default,)[^,]+', $fontName
-            Set-Content -LiteralPath $localSub -Value $assContent -Encoding UTF8
         }
+        $assContent = Get-Content -LiteralPath $localSub -Raw -Encoding UTF8
+        $preset = Show-SubtitleFontDialog $VideoPath $assContent ($ext -eq '.srt') $tmpDir
+        if (-not $preset) { return }
+        Set-SubtitleFont $assContent $preset ($ext -eq '.srt') | Set-Content -LiteralPath $localSub -Encoding UTF8
+        Write-Info "[嵌入硬字幕]"
+        Write-Info "字幕字体: $($preset.DisplayName)"
 
         # Keep MP4/MOV-family inputs in a compatible container. Other inputs use
         # MKV so every source audio track can be copied without a lossy conversion.
@@ -475,10 +594,10 @@ function Convert-Subtitle {
         )
 
         Write-Info "压制字幕 (CRF 16 高质量，兼容像素格式，全部音轨原样复制)..."
-        $escapedSub = $localSub -replace '\\', '/' -replace ':', '\:' -replace "'", "\'"
+        $subtitleFilter = Get-SubtitleFilter $localSub
         $dur = Get-VideoDuration $VideoPath
         $arguments = "-y -i `"$VideoPath`" -map 0:v:0 -map 0:a? -map_metadata 0 -map_chapters 0 " +
-                     "-vf `"subtitles='$escapedSub'`" -c:v libx264 -crf 16 -preset slow -pix_fmt yuv420p " +
+                     "-vf `"$subtitleFilter`" -c:v libx264 -crf 16 -preset slow -pix_fmt yuv420p " +
                      "-c:a copy `"$outFile`""
         $res = Invoke-FFmpeg $arguments $dur
 
@@ -560,7 +679,7 @@ function New-UiButton {
         [scriptblock]$Action,
         [int]$W = 170,
         [int]$H = 34,
-        [ValidateSet("Action", "Secondary", "Danger")][string]$Kind = "Action"
+        [ValidateSet("Action", "Secondary", "Danger", "Dialog")][string]$Kind = "Action"
     )
     $btn = New-Object System.Windows.Forms.Button
     $btn.Text = $Text
@@ -576,8 +695,137 @@ function New-UiButton {
     $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
     $btn.Add_Click($Action)
     $Parent.Controls.Add($btn)
-    if ($Kind -eq "Action") { $Script:ActionButtons += $btn } else { $Script:SecondaryButtons += $btn }
+    if ($Kind -eq "Action") { $Script:ActionButtons += $btn }
+    elseif ($Kind -ne "Dialog") { $Script:SecondaryButtons += $btn }
     return $btn
+}
+
+function Show-SubtitleFontDialog {
+    param([string]$VideoPath, [string]$AssContent, [bool]$PlainText, [string]$WorkingDirectory)
+    try { $presets = @(Get-SubtitleFontPresets) }
+    catch { Write-Warn $_.Exception.Message; return $null }
+    $previewTime = Get-SubtitlePreviewTime $AssContent
+    if ($null -eq $previewTime) { Write-Warn "字幕中没有可预览的台词，任务已取消"; return $null }
+
+    $dialog = New-Object System.Windows.Forms.Form
+    $preview = $null
+    $timer = New-Object System.Windows.Forms.Timer
+    $state = @{ Job = $null; Pending = $false; ValidPreset = $null }
+    $previewSub = Join-Path $WorkingDirectory 'preview.ass'
+    $previewImage = Join-Path $WorkingDirectory 'preview.png'
+    try {
+        $dialog.Name = "SubtitleFontDialog"
+        $dialog.Text = "字幕字体"
+        $dialog.Font = $form.Font
+        $dialog.BackColor = $C_BG
+        $dialog.ForeColor = $C_FG
+        $dialog.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $dialog.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
+        $dialog.ClientSize = New-Object System.Drawing.Size(512, 432)
+        $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterParent
+        $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $dialog.MaximizeBox = $false
+        $dialog.MinimizeBox = $false
+        $dialog.ShowInTaskbar = $false
+
+        New-UiLabel $dialog "字体" 24 16 464 24 $form.Font $C_MUTED | Out-Null
+        $combo = New-Object System.Windows.Forms.ComboBox
+        $combo.Name = "SubtitleFontCombo"
+        $combo.Location = New-Object System.Drawing.Point(24, 48)
+        $combo.Size = New-Object System.Drawing.Size(464, 28)
+        $combo.BackColor = $C_BG2
+        $combo.ForeColor = $C_FG
+        $combo.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $combo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+        $combo.DisplayMember = 'DisplayName'
+        $combo.Items.AddRange([object[]]$presets)
+        $dialog.Controls.Add($combo)
+
+        $preview = New-Object System.Windows.Forms.PictureBox
+        $preview.Name = "SubtitleFontPreview"
+        $preview.Location = New-Object System.Drawing.Point(24, 88)
+        $preview.Size = New-Object System.Drawing.Size(464, 260)
+        $preview.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+        $preview.BackColor = [System.Drawing.Color]::FromArgb(12, 13, 15)
+        $dialog.Controls.Add($preview)
+        $previewStatus = New-UiLabel $preview "正在生成预览" 0 0 464 260 $form.Font $C_MUTED ([System.Drawing.ContentAlignment]::MiddleCenter)
+
+        $cancel = New-UiButton $dialog "取消" 280 374 {} 96 34 "Dialog"
+        $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $confirm = New-UiButton $dialog "开始压制" 392 374 {} 96 34 "Dialog"
+        $confirm.BackColor = $C_ACC
+        $confirm.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dialog.AcceptButton = $confirm
+        $dialog.CancelButton = $cancel
+
+        $combo.Add_SelectedIndexChanged({
+            $timer.Stop()
+            Stop-SubtitlePreview $state.Job
+            $state.Job = $null
+            $state.ValidPreset = $null
+            $state.Pending = $true
+            if ($preview.Image) { $preview.Image.Dispose(); $preview.Image = $null }
+            $previewStatus.Text = "正在生成预览"
+            $previewStatus.Visible = $true
+            $confirm.Enabled = $false
+            $timer.Start()
+        })
+        $timer.Interval = 150
+        $timer.Add_Tick({
+            $failure = $null
+            try {
+                if ($state.Pending) {
+                    $state.Pending = $false
+                    Set-SubtitleFont $AssContent $combo.SelectedItem $PlainText | Set-Content -LiteralPath $previewSub -Encoding UTF8
+                    if (Test-Path -LiteralPath $previewImage) { Remove-Item -LiteralPath $previewImage -Force }
+                    $state.Job = Start-SubtitlePreview $VideoPath $previewSub $previewImage $previewTime
+                    return
+                }
+                if (-not $state.Job) { return }
+                if (-not $state.Job.Process.HasExited) {
+                    if (([DateTime]::UtcNow - $state.Job.Started).TotalSeconds -gt 15) { throw '预览超时' }
+                    return
+                }
+                $renderLog = $state.Job.ErrorTask.GetAwaiter().GetResult()
+                if ($state.Job.Process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $previewImage)) { throw '无法生成字幕预览' }
+                $fontPattern = 'fontselect: \(' + [regex]::Escape($combo.SelectedItem.FontName) + ',[^\r\n]+->[^\r\n]+Thin'
+                if ($renderLog -match $fontPattern) { throw '字幕字重匹配异常' }
+                $rendered = [System.Drawing.Image]::FromFile($previewImage)
+                try { $preview.Image = New-Object System.Drawing.Bitmap($rendered) }
+                finally { $rendered.Dispose() }
+                $preview.Tag = $renderLog
+                $state.ValidPreset = $combo.SelectedItem
+                $previewStatus.Visible = $false
+                $confirm.Enabled = $true
+            } catch {
+                $confirm.Enabled = $false
+                $previewStatus.Text = $_.Exception.Message
+                $previewStatus.Visible = $true
+                $failure = $_.Exception.Message
+            }
+            $timer.Stop()
+            Stop-SubtitlePreview $state.Job
+            $state.Job = $null
+            if ($failure) { Write-Warn "字幕预览失败: $failure" }
+        })
+        $combo.SelectedIndex = 0
+        $dialog.Add_Shown({
+            $darkVal = 1
+            [DwmApi]::DwmSetWindowAttribute($dialog.Handle, $DWMWA_USE_DARK_MODE, [ref]$darkVal, 4) | Out-Null
+            $combo.Focus() | Out-Null
+        })
+
+        if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+            return $state.ValidPreset
+        }
+        return $null
+    } finally {
+        $timer.Stop()
+        $timer.Dispose()
+        Stop-SubtitlePreview $state.Job
+        if ($preview -and $preview.Image) { $preview.Image.Dispose() }
+        $dialog.Dispose()
+    }
 }
 
 # ---- 顶部标题 ----
