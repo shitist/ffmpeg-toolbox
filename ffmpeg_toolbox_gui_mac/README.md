@@ -13,17 +13,26 @@ Implemented tasks:
 - Generate difference images
 - Generate quality reports
 - Burn hard subtitles from SRT/ASS
+- Choose bundled Noto Sans Chinese or Japanese subtitle fonts
+- Preview the selected font on a real video frame before encoding
+
+The app includes Noto Sans CJK 2.004 Regular and Bold. The bundled fonts are
+loaded only by ffmpeg and are not installed as macOS system fonts. See
+`assets/fonts/FONT-NOTICE.txt` and `assets/fonts/OFL.txt` for attribution and
+license details.
 
 ## Requirements
 
 - macOS
 - Node.js and npm
-- ffmpeg and ffprobe available in `PATH`
+- ffmpeg and ffprobe
+- The ffmpeg `subtitles` filter (libass) for subtitle preview and hard subtitles
 
-Install ffmpeg with Homebrew if needed:
+Homebrew's regular `ffmpeg` formula may omit libass. Install `ffmpeg-full` for
+all features; the app automatically detects its keg-only path:
 
 ```sh
-brew install ffmpeg
+brew install ffmpeg-full
 ```
 
 ## Development

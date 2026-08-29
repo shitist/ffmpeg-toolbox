@@ -2,12 +2,17 @@
   "name": "ffmpeg-toolbox-gui-mac",
   "version": "0.1.0",
   "description": "Mac Electron GUI for ffmpeg-toolbox.",
+  "author": "shitist",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shitist/ffmpeg-toolbox.git"
+  },
   "main": "src/main/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main/main.js && node --check src/preload/preload.js && node --check src/renderer/app.js",
-    "build:mac": "electron-builder --mac dmg zip"
+    "check": "node --check src/main/main.js && node --check src/main/subtitles.js && node --check src/preload/preload.js && node --check src/renderer/app.js",
+    "build:mac": "electron-builder --mac dmg zip --publish never"
   },
   "devDependencies": {
     "electron": "^43.0.0",
@@ -18,7 +23,14 @@
     "productName": "ffmpeg Toolbox",
     "files": [
       "src/**/*",
+      "!src/**/*.test.js",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/fonts",
+        "to": "fonts"
+      }
     ],
     "mac": {
       "category": "public.app-category.video",

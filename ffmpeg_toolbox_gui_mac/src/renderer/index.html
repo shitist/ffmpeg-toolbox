@@ -59,7 +59,6 @@
             <h2>字幕处理</h2>
             <div class="subtitle-controls">
               <button data-action="subtitle" type="button">嵌入硬字幕</button>
-              <input id="fontNameInput" type="text" value="Microsoft YaHei" spellcheck="false" />
             </div>
           </section>
         </div>
@@ -82,6 +81,31 @@
         <pre id="logBox"></pre>
       </section>
     </main>
+
+    <dialog id="subtitleDialog" aria-labelledby="subtitleDialogTitle">
+      <div class="dialog-shell">
+        <header class="dialog-header">
+          <div>
+            <h2 id="subtitleDialogTitle">字幕字体</h2>
+            <p id="subtitleDialogFile"></p>
+          </div>
+          <button class="icon-button" id="subtitleDialogClose" type="button" aria-label="关闭" title="关闭">×</button>
+        </header>
+
+        <label class="field-label" for="subtitleFontSelect">字体</label>
+        <select id="subtitleFontSelect"></select>
+
+        <div class="subtitle-preview" aria-live="polite">
+          <img id="subtitlePreviewImage" alt="字幕效果预览" />
+          <div class="preview-status" id="subtitlePreviewStatus">正在生成预览</div>
+        </div>
+
+        <footer class="dialog-actions">
+          <button class="secondary-button" id="subtitleDialogCancel" type="button">取消</button>
+          <button id="subtitleDialogConfirm" type="button" disabled>开始压制</button>
+        </footer>
+      </div>
+    </dialog>
 
     <script src="./app.js"></script>
   </body>

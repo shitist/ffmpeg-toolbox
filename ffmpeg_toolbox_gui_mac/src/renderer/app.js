@@ -3,8 +3,17 @@ const state = {
   secondaryFile: "",
   lastOutputPath: "",
   busy: false,
-  dependenciesOk: false
+  dependenciesOk: false,
+  subtitleSupported: false,
+  dialogOpen: false,
+  subtitleFonts: [],
+  selectedSubtitleFontId: "noto-sc"
 };
+
+let subtitleDialogContext = null;
+let subtitleDialogResolver = null;
+let subtitlePreviewSequence = 0;
+let previewReadyFontId = "";
 
 const els = {
   dependencyStatus: document.querySelector("#dependencyStatus"),
@@ -19,7 +28,14 @@ const els = {
   progressFill: document.querySelector("#progressFill"),
   progressText: document.querySelector("#progressText"),
   logBox: document.querySelector("#logBox"),
-  fontNameInput: document.querySelector("#fontNameInput")
+  subtitleDialog: document.querySelector("#subtitleDialog"),
+  subtitleDialogFile: document.querySelector("#subtitleDialogFile"),
+  subtitleDialogClose: document.querySelector("#subtitleDialogClose"),
+  subtitleDialogCancel: document.querySelector("#subtitleDialogCancel"),
+  subtitleDialogConfirm: document.querySelector("#subtitleDialogConfirm"),
+  subtitleFontSelect: document.querySelector("#subtitleFontSelect"),
+  subtitlePreviewImage: document.querySelector("#subtitlePreviewImage"),
+  subtitlePreviewStatus: document.querySelector("#subtitlePreviewStatus")
 };
 
 const compareActions = new Set(["ssim", "diff", "quality"]);
@@ -65,6 +81,13 @@ els.cancelButton.addEventListener("click", () => window.toolbox.cancelTask());
 els.revealOutputButton.addEventListener("click", () => {
   if (state.lastOutputPath) window.toolbox.revealPath(state.lastOutputPath);
 });
+els.subtitleDialogClose.addEventListener("click", () => els.subtitleDialog.close("cancel"));
+els.subtitleDialogCancel.addEventListener("click", () => els.subtitleDialog.close("cancel"));
+els.subtitleDialogConfirm.addEventListener("click", () => {
+  if (previewReadyFontId === els.subtitleFontSelect.value) els.subtitleDialog.close("confirm");
+});
+els.subtitleFontSelect.addEventListener("change", renderSubtitlePreview);
+els.subtitleDialog.addEventListener("close", finishSubtitleDialog);
 
 document.querySelectorAll("[data-action]").forEach((button) => {
   button.addEventListener("click", () => runAction(button.dataset.action));
@@ -87,10 +110,16 @@ els.dropZone.addEventListener("drop", (event) => {
 });
 
 async function refreshStatus() {
-  const result = await window.toolbox.getStatus();
+  const [result, fontResult] = await Promise.all([
+    window.toolbox.getStatus(),
+    window.toolbox.getSubtitleFonts()
+  ]);
   state.dependenciesOk = result.ok;
+  state.subtitleSupported = result.subtitleSupported;
+  state.subtitleFonts = fontResult.ok ? fontResult.fonts : [];
   if (result.ok) {
-    els.dependencyStatus.textContent = `ffmpeg: ${result.paths.ffmpeg}    ffprobe: ${result.paths.ffprobe}`;
+    const subtitleStatus = result.subtitleSupported ? "" : "    字幕滤镜不可用（需 ffmpeg-full）";
+    els.dependencyStatus.textContent = `ffmpeg: ${result.paths.ffmpeg}    ffprobe: ${result.paths.ffprobe}${subtitleStatus}`;
   } else {
     els.dependencyStatus.textContent = "未找到 ffmpeg / ffprobe，请先安装并加入 PATH";
   }
@@ -134,6 +163,7 @@ async function runAction(action) {
   }
 
   let subtitleFile = "";
+  let fontId = "";
   if (compareActions.has(action) && !state.secondaryFile) {
     const files = await window.toolbox.selectVideoFiles();
     if (!files.length) {
@@ -147,6 +177,8 @@ async function runAction(action) {
   if (action === "subtitle") {
     subtitleFile = await window.toolbox.selectSubtitleFile();
     if (!subtitleFile) return;
+    fontId = await showSubtitleDialog(state.primaryFile, subtitleFile);
+    if (!fontId) return;
   }
 
   clearLog();
@@ -155,7 +187,7 @@ async function runAction(action) {
     primaryFile: state.primaryFile,
     secondaryFile: state.secondaryFile,
     subtitleFile,
-    fontName: els.fontNameInput.value.trim() || "Microsoft YaHei"
+    fontId
   });
 
   if (!result.ok) appendLog(result.message, "error");
@@ -164,16 +196,104 @@ async function runAction(action) {
 function setBusy(busy) {
   state.busy = busy;
   els.cancelButton.disabled = !busy;
-  els.chooseFileButton.disabled = busy;
-  els.clearSecondButton.disabled = busy;
-  els.refreshStatusButton.disabled = busy;
+  updateLockedControls();
+}
+
+function updateLockedControls() {
+  const locked = state.busy || state.dialogOpen;
+  els.chooseFileButton.disabled = locked;
+  els.clearSecondButton.disabled = locked;
+  els.refreshStatusButton.disabled = locked;
   updateActionButtons();
 }
 
 function updateActionButtons() {
   document.querySelectorAll("[data-action]").forEach((button) => {
-    button.disabled = state.busy || !state.dependenciesOk || !state.primaryFile;
+    const subtitleUnavailable = button.dataset.action === "subtitle" && (!state.subtitleSupported || state.subtitleFonts.length === 0);
+    button.disabled = state.busy || state.dialogOpen || !state.dependenciesOk || !state.primaryFile || subtitleUnavailable;
   });
+}
+
+function showSubtitleDialog(videoPath, subtitlePath) {
+  if (!state.subtitleFonts.length) {
+    appendLog("内置字幕字体不可用", "error");
+    return Promise.resolve("");
+  }
+
+  els.subtitleFontSelect.replaceChildren(...state.subtitleFonts.map((font) => {
+    const option = document.createElement("option");
+    option.value = font.id;
+    option.textContent = font.displayName;
+    return option;
+  }));
+  if (state.subtitleFonts.some((font) => font.id === state.selectedSubtitleFontId)) {
+    els.subtitleFontSelect.value = state.selectedSubtitleFontId;
+  }
+
+  subtitleDialogContext = { videoPath, subtitlePath };
+  previewReadyFontId = "";
+  state.dialogOpen = true;
+  updateLockedControls();
+  els.subtitleDialogFile.textContent = basename(subtitlePath);
+  els.subtitleDialog.returnValue = "";
+  els.subtitleDialog.showModal();
+  els.subtitleFontSelect.focus();
+  renderSubtitlePreview();
+
+  return new Promise((resolve) => {
+    subtitleDialogResolver = resolve;
+  });
+}
+
+async function renderSubtitlePreview() {
+  if (!subtitleDialogContext || !els.subtitleDialog.open) return;
+  const sequence = ++subtitlePreviewSequence;
+  const fontId = els.subtitleFontSelect.value;
+  previewReadyFontId = "";
+  els.subtitleDialogConfirm.disabled = true;
+  els.subtitlePreviewImage.style.display = "none";
+  els.subtitlePreviewImage.removeAttribute("src");
+  els.subtitlePreviewStatus.hidden = false;
+  els.subtitlePreviewStatus.textContent = "正在生成预览";
+
+  let result;
+  try {
+    result = await window.toolbox.previewSubtitle({
+      videoPath: subtitleDialogContext.videoPath,
+      subtitlePath: subtitleDialogContext.subtitlePath,
+      fontId
+    });
+  } catch (error) {
+    result = { ok: false, message: error.message || String(error) };
+  }
+  if (sequence !== subtitlePreviewSequence || !els.subtitleDialog.open) return;
+
+  if (!result.ok) {
+    els.subtitlePreviewStatus.textContent = `预览失败: ${result.message}`;
+    return;
+  }
+
+  els.subtitlePreviewImage.src = result.imageDataUrl;
+  els.subtitlePreviewImage.style.display = "block";
+  els.subtitlePreviewStatus.hidden = true;
+  previewReadyFontId = result.fontId;
+  els.subtitleDialogConfirm.disabled = previewReadyFontId !== els.subtitleFontSelect.value;
+}
+
+function finishSubtitleDialog() {
+  subtitlePreviewSequence += 1;
+  const confirmed = els.subtitleDialog.returnValue === "confirm" && previewReadyFontId === els.subtitleFontSelect.value;
+  const selectedFontId = confirmed ? els.subtitleFontSelect.value : "";
+  if (selectedFontId) state.selectedSubtitleFontId = selectedFontId;
+
+  subtitleDialogContext = null;
+  previewReadyFontId = "";
+  state.dialogOpen = false;
+  updateLockedControls();
+
+  const resolve = subtitleDialogResolver;
+  subtitleDialogResolver = null;
+  if (resolve) resolve(selectedFontId);
 }
 
 function setProgress(percent, text) {

@@ -3,9 +3,17 @@ const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
+const {
+  applySubtitleFont,
+  buildSubtitleFilter,
+  getSubtitleFontPreset,
+  getSubtitlePreviewTime,
+  listSubtitleFonts
+} = require("./subtitles");
 
 let mainWindow;
 let activeTask = null;
+const subtitleFilterCache = new Map();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -45,6 +53,14 @@ function findBinary(name) {
     return resourceCandidate;
   }
 
+  const fullCandidates = [
+    path.join("/opt/homebrew/opt/ffmpeg-full/bin", name),
+    path.join("/usr/local/opt/ffmpeg-full/bin", name)
+  ];
+  for (const candidate of fullCandidates) {
+    if (spawnSync("test", ["-x", candidate]).status === 0) return candidate;
+  }
+
   const result = spawnSync("which", [name], { encoding: "utf8" });
   if (result.status === 0) return result.stdout.trim();
   return "";
@@ -61,7 +77,8 @@ ipcMain.handle("toolbox:get-status", () => {
   const paths = getToolPaths();
   return {
     ok: Boolean(paths.ffmpeg && paths.ffprobe),
-    paths
+    paths,
+    subtitleSupported: Boolean(paths.ffmpeg && hasSubtitleFilter(paths.ffmpeg))
   };
 });
 
@@ -89,6 +106,34 @@ ipcMain.handle("toolbox:select-subtitle-file", async () => {
   return result.canceled ? "" : result.filePaths[0];
 });
 
+ipcMain.handle("toolbox:get-subtitle-fonts", async () => {
+  try {
+    await assertSubtitleFonts();
+    return { ok: true, fonts: listSubtitleFonts() };
+  } catch (error) {
+    return { ok: false, message: error.message || String(error), fonts: [] };
+  }
+});
+
+ipcMain.handle("toolbox:preview-subtitle", async (_event, request) => {
+  if (activeTask) return { ok: false, message: "请等待当前任务结束后再预览字幕" };
+
+  const paths = getToolPaths();
+  if (!paths.ffmpeg || !paths.ffprobe) {
+    return { ok: false, message: "未找到 ffmpeg / ffprobe，请先安装并加入 PATH" };
+  }
+  if (!hasSubtitleFilter(paths.ffmpeg)) {
+    return { ok: false, message: getSubtitleDependencyMessage() };
+  }
+
+  try {
+    const preview = await createSubtitlePreview(request || {}, paths);
+    return { ok: true, ...preview };
+  } catch (error) {
+    return { ok: false, message: error.message || String(error) };
+  }
+});
+
 ipcMain.handle("toolbox:reveal-path", async (_event, filePath) => {
   if (filePath) shell.showItemInFolder(filePath);
 });
@@ -107,6 +152,9 @@ ipcMain.handle("toolbox:start-task", async (_event, request) => {
   const paths = getToolPaths();
   if (!paths.ffmpeg || !paths.ffprobe) {
     return { ok: false, message: "未找到 ffmpeg / ffprobe，请先安装并加入 PATH" };
+  }
+  if (request.action === "subtitle" && !hasSubtitleFilter(paths.ffmpeg)) {
+    return { ok: false, message: getSubtitleDependencyMessage() };
   }
 
   const taskId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -164,7 +212,7 @@ async function runTask(taskId, request, paths) {
       await createQualityReport(primary, secondary, paths);
       break;
     case "subtitle":
-      await burnSubtitle(primary, request.subtitleFile, request.fontName || "Microsoft YaHei", paths, task);
+      await burnSubtitle(primary, request.subtitleFile, request.fontId, paths, task);
       break;
     default:
       throw new Error("未知任务");
@@ -305,36 +353,26 @@ async function createQualityReport(first, second, paths) {
   emitTask({ type: "done", ok: true, outputPath: output, message: `结果: SSIM ${scoreText}\n图片: ${output}` });
 }
 
-async function burnSubtitle(videoPath, subtitlePath, fontName, paths, task) {
+async function burnSubtitle(videoPath, subtitlePath, fontId, paths, task) {
   await assertFile(videoPath, "视频文件");
   await assertFile(subtitlePath, "字幕文件");
   emitTask({ type: "log", level: "info", message: "[嵌入硬字幕]" });
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ffmpeg_toolbox_sub_"));
   task.tempDirs.push(tempDir);
-
   const subtitleExt = path.extname(subtitlePath).toLowerCase();
-  if (![".srt", ".ass"].includes(subtitleExt)) throw new Error("字幕文件必须是 srt 或 ass");
-
-  let localSubtitle = path.join(tempDir, `subtitle${subtitleExt}`);
-  await fs.copyFile(subtitlePath, localSubtitle);
-
   if (subtitleExt === ".srt") {
     emitTask({ type: "log", level: "info", message: "SRT -> ASS 转换..." });
-    const assFile = path.join(tempDir, "subtitle.ass");
-    await runFfmpeg(paths, ["-loglevel", "error", "-y", "-sub_charenc", "UTF-8", "-i", localSubtitle, assFile]);
-    localSubtitle = assFile;
   }
 
-  const assContent = await fs.readFile(localSubtitle, "utf8");
-  const nextAssContent = assContent.replace(/(?<=Style: Default,)[^,]+/, fontName);
-  await fs.writeFile(localSubtitle, nextAssContent, "utf8");
+  const prepared = await prepareSubtitle(subtitlePath, fontId, paths, tempDir);
+  emitTask({ type: "log", level: "info", message: `字幕字体: ${prepared.preset.displayName}` });
 
   const videoExt = path.extname(videoPath).toLowerCase();
   const outputExt = videoExt === ".mp4" || videoExt === ".m4v" ? ".mp4" : videoExt === ".mov" ? ".mov" : ".mkv";
   const output = siblingOutput(videoPath, "sub", outputExt);
   const duration = await getVideoDuration(videoPath, paths);
-  const escapedSubtitle = escapeSubtitleFilterPath(localSubtitle);
+  const subtitleFilter = buildSubtitleFilter(prepared.subtitlePath, prepared.fontDirectory);
 
   emitTask({ type: "log", level: "info", message: "压制字幕 (CRF 16 高质量，兼容像素格式，全部音轨原样复制)..." });
   await runFfmpeg(paths, [
@@ -350,7 +388,7 @@ async function burnSubtitle(videoPath, subtitlePath, fontName, paths, task) {
     "-map_chapters",
     "0",
     "-vf",
-    `subtitles='${escapedSubtitle}'`,
+    subtitleFilter,
     "-c:v",
     "libx264",
     "-crf",
@@ -367,14 +405,127 @@ async function burnSubtitle(videoPath, subtitlePath, fontName, paths, task) {
   emitTask({ type: "done", ok: true, outputPath: output, message: `完成: ${output}` });
 }
 
+async function createSubtitlePreview(request, paths) {
+  const videoPath = typeof request.videoPath === "string" ? request.videoPath : "";
+  const subtitlePath = typeof request.subtitlePath === "string" ? request.subtitlePath : "";
+  await assertFile(videoPath, "视频文件");
+  await assertFile(subtitlePath, "字幕文件");
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ffmpeg_toolbox_preview_"));
+  try {
+    const prepared = await prepareSubtitle(subtitlePath, request.fontId, paths, tempDir, { silent: true, trackTask: false });
+    const previewTime = getSubtitlePreviewTime(prepared.content);
+    if (previewTime === null) throw new Error("字幕中没有可预览的台词");
+
+    const output = path.join(tempDir, "preview.png");
+    const seconds = previewTime.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    const subtitleFilter = buildSubtitleFilter(prepared.subtitlePath, prepared.fontDirectory);
+    const videoFilter = [
+      `setpts=PTS+${seconds}/TB`,
+      subtitleFilter,
+      "scale=960:540:force_original_aspect_ratio=decrease",
+      "pad=960:540:(ow-iw)/2:(oh-ih)/2:color=0x0c0d0f"
+    ].join(",");
+
+    await runProcess(paths.ffmpeg, [
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-ss",
+      seconds,
+      "-i",
+      videoPath,
+      "-vf",
+      videoFilter,
+      "-frames:v",
+      "1",
+      "-an",
+      "-sn",
+      "-c:v",
+      "png",
+      "-threads",
+      "1",
+      "-update",
+      "1",
+      output
+    ], { collect: true, silent: true, timeoutMs: 15000, trackTask: false });
+
+    const image = await fs.readFile(output);
+    return {
+      fontId: prepared.preset.id,
+      imageDataUrl: `data:image/png;base64,${image.toString("base64")}`,
+      previewTime
+    };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function prepareSubtitle(subtitlePath, fontId, paths, tempDir, options = {}) {
+  await assertFile(subtitlePath, "字幕文件");
+  const fontDirectory = await assertSubtitleFonts();
+  const preset = getSubtitleFontPreset(fontId);
+  const subtitleExt = path.extname(subtitlePath).toLowerCase();
+  if (![".srt", ".ass"].includes(subtitleExt)) throw new Error("字幕文件必须是 srt 或 ass");
+
+  let localSubtitle = path.join(tempDir, `subtitle${subtitleExt}`);
+  await fs.copyFile(subtitlePath, localSubtitle);
+
+  if (subtitleExt === ".srt") {
+    const assFile = path.join(tempDir, "subtitle.ass");
+    await runProcess(paths.ffmpeg, [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-sub_charenc",
+      "UTF-8",
+      "-i",
+      localSubtitle,
+      assFile
+    ], { collect: true, silent: options.silent, trackTask: options.trackTask });
+    localSubtitle = assFile;
+  }
+
+  const content = applySubtitleFont(await fs.readFile(localSubtitle, "utf8"), preset, subtitleExt === ".srt");
+  await fs.writeFile(localSubtitle, content, "utf8");
+  return { content, fontDirectory, preset, subtitlePath: localSubtitle };
+}
+
+async function assertSubtitleFonts() {
+  const fontDirectory = app.isPackaged
+    ? path.join(process.resourcesPath, "fonts", "noto-cjk")
+    : path.join(app.getAppPath(), "assets", "fonts", "noto-cjk");
+  const required = ["NotoSansCJK-Regular.ttc", "NotoSansCJK-Bold.ttc"];
+  for (const name of required) {
+    const stat = await fs.stat(path.join(fontDirectory, name)).catch(() => null);
+    if (!stat || !stat.isFile()) throw new Error(`内置字幕字体缺失: ${name}`);
+  }
+  return fontDirectory;
+}
+
+function hasSubtitleFilter(ffmpegPath) {
+  if (subtitleFilterCache.has(ffmpegPath)) return subtitleFilterCache.get(ffmpegPath);
+  const result = spawnSync(ffmpegPath, ["-hide_banner", "-filters"], {
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024
+  });
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+  const supported = result.status === 0 && /^\s*[TSC.]{2,3}\s+subtitles\s+/m.test(output);
+  subtitleFilterCache.set(ffmpegPath, supported);
+  return supported;
+}
+
+function getSubtitleDependencyMessage() {
+  return "当前 ffmpeg 缺少 subtitles/libass 滤镜。请安装 Homebrew ffmpeg-full：brew install ffmpeg-full";
+}
+
 function parseSsim(output) {
   const matches = [...output.matchAll(/All:(\d\.\d+)/g)];
   if (!matches.length) return null;
   return Number.parseFloat(matches[matches.length - 1][1]);
-}
-
-function escapeSubtitleFilterPath(filePath) {
-  return filePath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
 async function runFfmpeg(paths, args, totalSeconds = 0) {
@@ -386,19 +537,27 @@ async function runFfmpeg(paths, args, totalSeconds = 0) {
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    if (activeTask && activeTask.cancelled) {
+    const task = options.trackTask === false ? null : activeTask;
+    if (task && task.cancelled) {
       reject(new Error("任务已取消"));
       return;
     }
 
     let output = "";
     let recent = "";
+    let timedOut = false;
     const startedAt = Date.now();
     const child = spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"]
     });
+    const timeout = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, options.timeoutMs)
+      : null;
 
-    if (activeTask) activeTask.process = child;
+    if (task) task.process = child;
 
     child.stdout.on("data", (chunk) => {
       const text = chunk.toString();
@@ -412,14 +571,24 @@ function runProcess(command, args, options = {}) {
       recent += text;
       const parts = recent.split(/\r|\n/);
       recent = parts.pop() || "";
-      for (const part of parts) handleProcessLine(part, options.totalSeconds, startedAt);
-      handleProcessLine(recent, options.totalSeconds, startedAt, true);
+      if (!options.silent) {
+        for (const part of parts) handleProcessLine(part, options.totalSeconds, startedAt);
+        handleProcessLine(recent, options.totalSeconds, startedAt, true);
+      }
     });
 
-    child.on("error", reject);
+    child.on("error", (error) => {
+      if (timeout) clearTimeout(timeout);
+      reject(error);
+    });
     child.on("close", (code, signal) => {
-      if (activeTask && activeTask.process === child) activeTask.process = null;
-      if (activeTask && activeTask.cancelled) {
+      if (timeout) clearTimeout(timeout);
+      if (task && task.process === child) task.process = null;
+      if (timedOut) {
+        reject(new Error("字幕预览超时"));
+        return;
+      }
+      if (task && task.cancelled) {
         reject(new Error("任务已取消"));
         return;
       }

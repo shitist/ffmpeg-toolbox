@@ -47,7 +47,7 @@ Double-click `ffmpeg_toolbox_gui.exe`, drag in a video file, then click an actio
 macOS GUI 位于 `ffmpeg_toolbox_gui_mac/`，是一套独立的 Electron 应用工程，已包含 GUI 和 ffmpeg/ffprobe 调用逻辑。
 The macOS GUI lives in `ffmpeg_toolbox_gui_mac/`. It is a standalone Electron app containing both the GUI and ffmpeg/ffprobe task logic.
 
-macOS 版尚未支持内置字体下拉选择和字幕效果预览。
+macOS 版支持内置 Noto Sans 中日文字体选择，并可在压制前预览真实视频画面中的字幕效果。
 
 源码运行 / Run from source:
 
@@ -83,10 +83,10 @@ You can also drag two files at once for comparison (SSIM, diff, quality) or vide
 
 - **ffmpeg** (含 ffprobe) — 下载: [ffmpeg.org](https://ffmpeg.org/download.html)
 - **Windows GUI / CLI**: Windows, PowerShell 5.1+
-- **macOS GUI**: macOS, Node.js, npm
+- **macOS GUI**: macOS, Node.js, npm；字幕功能需要带 libass/subtitles 滤镜的 ffmpeg
 
-启动时，工具会从系统 PATH 检测 ffmpeg。Windows CLI 可在未找到时手动输入路径；macOS GUI 需要 ffmpeg 和 ffprobe 已在 PATH 中。
-On launch, the tool checks for ffmpeg from your system PATH. Windows CLI can prompt for a manual path; the macOS GUI expects ffmpeg and ffprobe to be available in PATH.
+启动时，工具会检测 ffmpeg。Windows CLI 可在未找到时手动输入路径；macOS GUI 会检测 PATH，并优先识别 Homebrew 的 `ffmpeg-full`。
+On launch, the tool detects ffmpeg. Windows CLI can prompt for a manual path; the macOS GUI checks PATH and also prefers Homebrew's `ffmpeg-full`.
 
 ---
 
@@ -103,11 +103,11 @@ On launch, the tool checks for ffmpeg from your system PATH. Windows CLI can pro
 
 ### macOS
 
-1. 安装 ffmpeg。
-   Install ffmpeg.
+1. 安装包含 libass 字幕滤镜的 ffmpeg-full。
+   Install ffmpeg-full with the libass subtitle filter.
 
    ```sh
-   brew install ffmpeg
+   brew install ffmpeg-full
    ```
 
 2. 安装并启动 Mac GUI。
