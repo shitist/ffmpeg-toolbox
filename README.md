@@ -3,7 +3,7 @@
 > 一个基于 ffmpeg 的交互式视频处理工具箱，支持格式转换、质量对比、参数查看、频谱图、硬字幕等功能。
 > An interactive ffmpeg-based video processing toolbox with format conversion, quality comparison, parameter inspection, spectrum images, hard subtitles and more.
 
-![version](https://img.shields.io/badge/version-v2.1.0-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![version](https://img.shields.io/badge/version-v2.2.0-blue) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
@@ -17,7 +17,7 @@
 | 4 | **分色带刻度频谱** | Generate color spectrum visualization (showspectrumpic) |
 | 5 | **SSIM 还原百分比（双文件对比）** | SSIM structural similarity comparison between two files |
 | 6 | **差值图（高亮强化，双文件对比）** | Generate difference map with enhanced highlights |
-| 7 | **全方位质量对比（分值+图）** | Comprehensive quality comparison (SSIM score + difference image) |
+| 7 | **媒体编码信息（Windows GUI）；全方位质量对比（CLI、macOS）** | Media encoding information (Windows GUI); comprehensive quality comparison (CLI, macOS) |
 | 8 | **嵌入硬字幕（高画质）** | Burn hard subtitles (GUI: CRF 16, compatible YUV420P; CLI: CRF 18) |
 
 ---
@@ -26,10 +26,13 @@
 
 ### Windows GUI
 
-双击运行 `ffmpeg_toolbox_gui.exe`，拖入视频文件后点击功能按钮即可。
-Double-click `ffmpeg_toolbox_gui.exe`, drag in a video file, then click an action button.
+双击运行 `ffmpeg_toolbox_gui.exe`，拖入媒体文件后点击功能按钮即可。
+Double-click `ffmpeg_toolbox_gui.exe`, drag in a media file, then click an action button.
 
 - 拖拽视频到窗口自动显示分辨率/帧率/码率
+- 支持查看音频或视频文件的各轨编码格式、编码配置和平均码率；音轨同时显示采样率、声道数
+- 编码信息显示在任务日志中，平均码率按各轨数据包统计
+- 配合频谱图，可判断高频截断等特征是否符合编码特点，为分析音频质量和转码疑点提供更多依据
 - 功能按钮一键运行，内嵌控制台实时输出
 - 实时进度条（百分比 + 耗时 + 剩余时间 + 编码速度）
 - 支持中途取消任务，崩溃自动恢复并报错
@@ -49,6 +52,8 @@ The macOS GUI lives in `ffmpeg_toolbox_gui_mac/`. It is a standalone Electron ap
 
 macOS 版支持内置 Noto Sans 中日文字体选择，并可在压制前预览真实视频画面中的字幕效果。
 
+macOS 版尚未支持媒体编码信息查看。
+
 源码运行 / Run from source:
 
 ```sh
@@ -67,8 +72,8 @@ npm run build:mac
 For public `.app` / `.dmg` distribution, Apple code signing and notarization are recommended.
 
 ### 交互菜单 / Interactive Menu
-双击运行 `ffmpeg自动工具箱.exe` 或 `ffmpeg自动工具箱.bat`，在菜单中选择功能编号即可。  
-Double-click `ffmpeg自动工具箱.exe` or `ffmpeg自动工具箱.bat`, then select a function by number.
+双击运行控制台版 `ffmpeg_toolbox.exe`（源码目录中为 `ffmpeg自动工具箱.exe`）或 `ffmpeg自动工具箱.bat`，在菜单中选择功能编号即可。
+Double-click the CLI release executable `ffmpeg_toolbox.exe` (`ffmpeg自动工具箱.exe` in the source directory) or `ffmpeg自动工具箱.bat`, then select a function by number.
 
 ### 拖拽文件 / Drag and Drop
 将视频文件直接拖到 exe 或 bat 图标上，工具会自动识别文件路径，跳过输入步骤。  
@@ -98,8 +103,8 @@ On launch, the tool detects ffmpeg. Windows CLI can prompt for a manual path; th
    Download the latest release from [Releases](https://github.com/shitist/ffmpeg-toolbox/releases), or clone the repository directly.
 2. 确保 ffmpeg 已安装并配置到系统 PATH 中。  
    Make sure ffmpeg is installed and added to your system PATH.
-3. 运行 `ffmpeg_toolbox_gui.exe` 或 `ffmpeg自动工具箱.exe`。
-   Run `ffmpeg_toolbox_gui.exe` or `ffmpeg自动工具箱.exe`.
+3. 运行 `ffmpeg_toolbox_gui.exe` 或 `ffmpeg_toolbox.exe`。
+   Run `ffmpeg_toolbox_gui.exe` or `ffmpeg_toolbox.exe`.
 
 ### macOS
 

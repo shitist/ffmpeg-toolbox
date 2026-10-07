@@ -80,16 +80,23 @@ function Write-Console {
 }
 
 function Write-ProgressLine {
-    param([string]$Text)
-    if (-not $Script:LastWasProgress) {
-        $Script:ProgressLineStart = $rtb.TextLength
-        $Script:LastWasProgress = $true
-    } else {
-        $rtb.Select($Script:ProgressLineStart, $rtb.TextLength - $Script:ProgressLineStart)
+    param([string]$Text, [switch]$PreserveScroll)
+    $restoreScroll = $PreserveScroll -and $Script:LastWasProgress
+    if ($restoreScroll) { $scrollPosition = [LogViewApi]::BeginUpdate($rtb.Handle) }
+    try {
+        if (-not $Script:LastWasProgress) {
+            $Script:ProgressLineStart = $rtb.TextLength
+            $Script:LastWasProgress = $true
+        } else {
+            $rtb.Select($Script:ProgressLineStart, $rtb.TextLength - $Script:ProgressLineStart)
+        }
+        $rtb.SelectionColor = $C_PROG
+        # Keep a trailing empty line so the entire statistics row stays visible.
+        $rtb.SelectedText = if ($PreserveScroll) { $Text + "`r`n" } else { $Text }
+        if (-not $restoreScroll) { $rtb.ScrollToCaret() }
+    } finally {
+        if ($restoreScroll) { [LogViewApi]::EndUpdate($rtb.Handle, $scrollPosition) }
     }
-    $rtb.SelectionColor = $C_PROG
-    $rtb.SelectedText = $Text
-    $rtb.ScrollToCaret()
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -274,15 +281,16 @@ function Stop-SubtitlePreview {
 }
 
 function Update-FileLabel {
+    if (-not $Script:IsProcessing) { $lblDropHint.Text = "当前文件" }
     if ($Script:CurrentFile) {
         $lblFileName.Text = Split-Path $Script:CurrentFile -Leaf
-        $meta = if ($Script:CurrentFileInfo) { $Script:CurrentFileInfo } else { "视频参数将在拖入后显示" }
+        $meta = if ($Script:CurrentFileInfo) { $Script:CurrentFileInfo } else { "媒体参数将在拖入后显示" }
         if ($Script:SecondFile) { $meta = "$meta    对比: $(Split-Path $Script:SecondFile -Leaf)" }
         $lblFileMeta.Text = $meta
         $lblFileName.ForeColor = $C_FG
         $lblFileMeta.ForeColor = $C_MUTED
     } else {
-        $lblFileName.Text = "未选择视频文件"
+        $lblFileName.Text = "未选择媒体文件"
         $lblFileMeta.Text = "拖入文件后可进行转换、分析、对比或字幕处理"
         $lblFileName.ForeColor = $C_MUTED
         $lblFileMeta.ForeColor = $C_MUTED
@@ -292,15 +300,220 @@ function Update-FileLabel {
 function Get-VideoInfo {
     param([string]$Path)
     if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return }
-    $output = cmd /c "$ffprobePath -v error -select_streams v:0 -show_entries stream=bit_rate,width,height,r_frame_rate -of default=noprint_wrappers=1 `"$Path`" 2>&1"
-    $w = $h = $fps = $br = ""
-    foreach ($line in $output) {
-        if ($line -match "width=(\d+)")  { $w = $matches[1] }
-        if ($line -match "height=(\d+)") { $h = $matches[1] }
-        if ($line -match "r_frame_rate=(\d+)/(\d+)" -and [int]$matches[2] -ne 0) { $fps = [math]::Round([int]$matches[1] / [int]$matches[2], 0) }
-        if ($line -match "bit_rate=(\d+)") { $br = "$([math]::Round([long]$matches[1] / 1000))k" }
+    try {
+        $output = & $ffprobePath -v error -show_streams -of json $Path 2>$null
+        if ($LASTEXITCODE -ne 0) { return "无法读取媒体信息" }
+        $streams = ($output -join "`n" | ConvertFrom-Json -ErrorAction Stop).streams
+        $video = $streams | Where-Object { $_.codec_type -eq 'video' -and $_.disposition.attached_pic -ne 1 } | Select-Object -First 1
+        if ($video) {
+            $parts = @("$($video.width)x$($video.height)")
+            if ($video.r_frame_rate -match '^(\d+)/(\d+)$' -and [double]$matches[2] -gt 0) {
+                $parts += "$([math]::Round([double]$matches[1] / [double]$matches[2], 2))fps"
+            }
+            $bitRate = ConvertTo-MediaNumber $video.bit_rate
+            if ($bitRate -gt 0) { $parts += "$([math]::Round($bitRate / 1000)) kbps" }
+            return $parts -join '  '
+        }
+        $audio = $streams | Where-Object { $_.codec_type -eq 'audio' } | Select-Object -First 1
+        if ($audio) {
+            $parts = @(Get-MediaCodecName $audio.codec_name)
+            $sampleRate = ConvertTo-MediaNumber $audio.sample_rate
+            if ($sampleRate -gt 0) { $parts += ($sampleRate / 1000).ToString('0.###', [System.Globalization.CultureInfo]::InvariantCulture) + ' kHz' }
+            if ($audio.channels -gt 0) { $parts += "$($audio.channels) 声道" }
+            return $parts -join '  '
+        }
+        return "未找到音视频轨"
+    } catch {
+        return "无法读取媒体信息"
     }
-    return "${w}x${h}  ${fps}fps  ${br}"
+}
+
+function ConvertTo-MediaNumber {
+    param($Value)
+    $number = 0.0
+    if ([double]::TryParse([string]$Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number) -and
+        -not [double]::IsNaN($number) -and -not [double]::IsInfinity($number)) { return $number }
+    return $null
+}
+
+function Get-MediaCodecName {
+    param([string]$Name)
+    switch ($Name) {
+        'h264' { return 'H.264 / AVC' }
+        'hevc' { return 'H.265 / HEVC' }
+        'opus' { return 'Opus' }
+        'vorbis' { return 'Vorbis' }
+        '' { return '未识别' }
+        'unknown' { return '未识别' }
+        default { return $Name.ToUpperInvariant() }
+    }
+}
+
+function Invoke-EncodingProbe {
+    param([string]$Arguments, [scriptblock]$OnPacket)
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $ffprobePath
+    $process.StartInfo.Arguments = $Arguments
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $process.StartInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $started = $false
+    try {
+        $started = $process.Start()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        if ($OnPacket) {
+            while (-not $Script:CancelRequested) {
+                $readTask = $process.StandardOutput.ReadLineAsync()
+                while (-not $readTask.IsCompleted -and -not $Script:CancelRequested) {
+                    [System.Windows.Forms.Application]::DoEvents()
+                    if ($form.IsDisposed) { $Script:CancelRequested = $true }
+                    Start-Sleep -Milliseconds 20
+                }
+                if ($Script:CancelRequested) { return $null }
+                $line = $readTask.GetAwaiter().GetResult()
+                if ($null -eq $line) { break }
+                & $OnPacket $line
+            }
+        } else {
+            $readTask = $process.StandardOutput.ReadToEndAsync()
+            while (-not $readTask.IsCompleted -and -not $Script:CancelRequested) {
+                [System.Windows.Forms.Application]::DoEvents()
+                if ($form.IsDisposed) { $Script:CancelRequested = $true }
+                Start-Sleep -Milliseconds 20
+            }
+            if ($Script:CancelRequested) { return $null }
+            $output = $readTask.GetAwaiter().GetResult()
+        }
+        while (-not $process.WaitForExit(20) -and -not $Script:CancelRequested) {
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($form.IsDisposed) { $Script:CancelRequested = $true }
+        }
+        if ($Script:CancelRequested) { return $null }
+        $errorOutput = $errorTask.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "ffprobe 读取失败: $($errorOutput.Trim())"
+        }
+        if ($OnPacket) { return $true }
+        return $output
+    } finally {
+        if ($started -and -not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        $process.Dispose()
+    }
+}
+
+function Get-MediaPacketRates {
+    param([string]$Path, [object[]]$Streams)
+    $statistics = @{}
+    foreach ($stream in $Streams) {
+        $statistics[[int]$stream.index] = @{
+            Bytes = [long]0; Count = [long]0; TimedCount = [long]0; TimestampCount = [long]0
+            Duration = 0.0; FirstTime = [double]::PositiveInfinity; LastTime = [double]::NegativeInfinity
+        }
+    }
+    $scan = @{ Clock = [System.Diagnostics.Stopwatch]::StartNew(); LastUpdate = 0; Count = [long]0 }
+    # FFprobe's CSV packet fields follow its section order, not show_entries order.
+    $onPacket = {
+        param([string]$Line)
+        if ([string]::IsNullOrWhiteSpace($Line)) { return }
+        $packet = $Line | ConvertFrom-Csv -Header 'Index', 'Time', 'Duration', 'Size'
+        $index = 0
+        $size = [long]0
+        if (-not [int]::TryParse($packet.Index, [ref]$index) -or -not $statistics.ContainsKey($index)) { return }
+        if (-not [long]::TryParse($packet.Size, [ref]$size) -or $size -lt 0) { throw '无法读取数据包大小' }
+        $entry = $statistics[$index]
+        $entry.Bytes += $size
+        $entry.Count++
+        $scan.Count++
+        $duration = ConvertTo-MediaNumber $packet.Duration
+        $time = ConvertTo-MediaNumber $packet.Time
+        if ($duration -gt 0) {
+            $entry.Duration += $duration
+            $entry.TimedCount++
+            if ($null -ne $time) {
+                $entry.FirstTime = [math]::Min($entry.FirstTime, $time)
+                $entry.LastTime = [math]::Max($entry.LastTime, $time + $duration)
+                $entry.TimestampCount++
+            }
+        }
+        if ($scan.Clock.ElapsedMilliseconds - $scan.LastUpdate -ge 150) {
+            $scan.LastUpdate = $scan.Clock.ElapsedMilliseconds
+            Write-ProgressLine "统计平均码率：已读取 $($scan.Count) 个音视频数据包" -PreserveScroll
+            if ($form.IsDisposed) { $Script:CancelRequested = $true }
+        }
+    }
+    Write-ProgressLine '统计平均码率...' -PreserveScroll
+    $complete = Invoke-EncodingProbe "-v error -show_packets -show_entries packet=stream_index,pts_time,duration_time,size -of csv=p=0 `"$Path`"" $onPacket
+    if (-not $complete) { return $null }
+    $rates = @{}
+    foreach ($stream in $Streams) {
+        $entry = $statistics[[int]$stream.index]
+        if ($entry.Count -eq 0) { continue }
+        $duration = $null
+        if ($entry.TimestampCount -eq $entry.Count) {
+            $duration = $entry.LastTime - $entry.FirstTime
+        } elseif ($entry.TimedCount -eq $entry.Count) {
+            $duration = $entry.Duration
+        } else {
+            $duration = ConvertTo-MediaNumber $stream.duration
+        }
+        if ($duration -gt 0) { $rates[[int]$stream.index] = $entry.Bytes * 8.0 / $duration }
+    }
+    return $rates
+}
+
+function Write-MediaEncodingReport {
+    param([string]$Path, [object[]]$Streams, [hashtable]$Rates)
+    Write-Info "[编码信息] $(Split-Path $Path -Leaf)"
+    $audioIndex = $videoIndex = 0
+    foreach ($stream in $Streams) {
+        Write-Console ''
+        if ($stream.codec_type -eq 'audio') { $audioIndex++; Write-Info "音频轨 $audioIndex" }
+        else { $videoIndex++; Write-Info "视频轨 $videoIndex" }
+        Write-Console "  编码格式：$(Get-MediaCodecName $stream.codec_name)"
+        $profile = [string]$stream.profile
+        if ([string]::IsNullOrWhiteSpace($profile) -or $profile -eq 'unknown') { $profile = '未提供' }
+        elseif ($stream.codec_name -eq 'aac' -and $profile -eq 'LC') { $profile = 'AAC-LC' }
+        Write-Console "  编码配置：$profile"
+        $bitRate = ConvertTo-MediaNumber $stream.bit_rate
+        $source = '读取值'
+        if ($Rates -and $Rates.ContainsKey([int]$stream.index)) { $bitRate = $Rates[[int]$stream.index]; $source = '数据包统计' }
+        $rateText = if ($bitRate -gt 0) { ($bitRate / 1000).ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture) + " kbps（$source）" } else { '未提供' }
+        Write-Console "  平均码率：$rateText"
+        if ($stream.codec_type -eq 'audio') {
+            $sampleRate = ConvertTo-MediaNumber $stream.sample_rate
+            $sampleText = if ($sampleRate -gt 0) { ($sampleRate / 1000).ToString('0.###', [System.Globalization.CultureInfo]::InvariantCulture) + ' kHz' } else { '未提供' }
+            Write-Console "  采样率：$sampleText"
+            $channelText = if ($stream.channels -gt 0) { [string]$stream.channels } else { '未提供' }
+            if ($stream.channel_layout) { $channelText += "（$($stream.channel_layout)）" }
+            Write-Console "  声道数：$channelText"
+        }
+    }
+}
+
+function Show-MediaEncoding {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Write-Warn '媒体文件不存在'; return }
+    Lock-UI
+    try {
+        $output = Invoke-EncodingProbe "-v error -show_streams -of json `"$Path`""
+        if ($Script:CancelRequested) { Write-Warn '已取消读取'; return }
+        $streams = @(($output | ConvertFrom-Json -ErrorAction Stop).streams | Where-Object {
+            $_.codec_type -eq 'audio' -or ($_.codec_type -eq 'video' -and $_.disposition.attached_pic -ne 1)
+        })
+        if ($streams.Count -eq 0) { Write-Warn '未找到音视频轨'; return }
+        Write-MediaEncodingReport $Path $streams
+        $rates = Get-MediaPacketRates $Path $streams
+        if ($Script:CancelRequested) { Write-Warn '已取消码率统计'; return }
+        Clear-Console
+        Write-MediaEncodingReport $Path $streams $rates
+    } catch {
+        if (-not $form.IsDisposed) { Write-Warn $_.Exception.Message }
+    } finally {
+        if (-not $form.IsDisposed) { Unlock-UI }
+    }
 }
 
 function Get-VideoDuration {
@@ -522,30 +735,6 @@ function Compare-Diff {
     if ($null -ne $res -and -not $Script:CancelRequested) { Write-Success "已保存: $outFile" }
 }
 
-function Compare-Quality {
-    param([string]$f1, [string]$f2)
-    if (-not (Test-Path -LiteralPath $f1) -or -not (Test-Path -LiteralPath $f2)) { Write-Warn "请确保两个文件都已选择"; return }
-    Write-Info "[全方位质量对比]"
-    Write-Info "1/2 计算 SSIM..."
-    $dur = Get-VideoDuration $f1
-    $output = Invoke-FFmpeg "-y -i `"$f1`" -i `"$f2`" -filter_complex ssim -f null -" $dur
-    if ($Script:CancelRequested) { return }
-    $scoreText = "失败"
-    $line = $output | Where-Object { $_ -match "All:(\d\.\d+)" } | Select-Object -Last 1
-    if ($line -match "All:(\d\.\d+)") {
-        $val = [double]::Parse($matches[1], [System.Globalization.CultureInfo]::InvariantCulture)
-        $scoreText = "$( ($val * 100).ToString('F4') ) %"
-    }
-    
-    $outFile = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($f1), "quality_report.jpg")
-    Write-Info "2/2 生成差值图..."
-    $res = Invoke-FFmpeg "-y -i `"$f1`" -i `"$f2`" -filter_complex `"blend=all_mode=difference,lutyuv=y=val*10:u=val:v=val`" -frames:v 1 -q:v 2 -update 1 `"$outFile`""
-    if ($null -ne $res -and -not $Script:CancelRequested) {
-        Write-Success "结果: SSIM $scoreText"
-        Write-Success "图片: $outFile"
-    }
-}
-
 function Convert-Subtitle {
     param([string]$VideoPath)
     if (-not (Test-Path -LiteralPath $VideoPath)) { Write-Warn "视频文件不存在"; return }
@@ -617,6 +806,29 @@ using System.Runtime.InteropServices;
 public class DwmApi {
     [DllImport("dwmapi.dll", PreserveSig = true)]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+}
+public static class LogViewApi {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ScrollPoint { public int X, Y; }
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendPoint(IntPtr hwnd, int message, IntPtr wParam, ref ScrollPoint point);
+    [DllImport("user32.dll")]
+    private static extern bool RedrawWindow(IntPtr hwnd, IntPtr rect, IntPtr region, uint flags);
+    public static ScrollPoint BeginUpdate(IntPtr hwnd) {
+        var point = new ScrollPoint();
+        SendPoint(hwnd, 0x04DD, IntPtr.Zero, ref point); // EM_GETSCROLLPOS
+        SendMessage(hwnd, 0x000B, IntPtr.Zero, IntPtr.Zero); // WM_SETREDRAW
+        return point;
+    }
+    public static void EndUpdate(IntPtr hwnd, ScrollPoint point) {
+        try { SendPoint(hwnd, 0x04DE, IntPtr.Zero, ref point); } // EM_SETSCROLLPOS
+        finally {
+            SendMessage(hwnd, 0x000B, (IntPtr)1, IntPtr.Zero);
+            RedrawWindow(hwnd, IntPtr.Zero, IntPtr.Zero, 0x0485); // Invalidate content and scrollbars.
+        }
+    }
 }
 "@
 Add-Type $dwm
@@ -842,7 +1054,7 @@ $pnlDrop.AllowDrop = $true
 $form.Controls.Add($pnlDrop)
 
 $lblDropHint = New-UiLabel $pnlDrop "当前文件" 20 14 180 22 (New-Object System.Drawing.Font($FONT_UI, 9, [System.Drawing.FontStyle]::Bold)) $C_FG
-$lblFileName = New-UiLabel $pnlDrop "未选择视频文件" 20 38 810 28 (New-Object System.Drawing.Font($FONT_UI, 12, [System.Drawing.FontStyle]::Bold)) $C_MUTED
+$lblFileName = New-UiLabel $pnlDrop "未选择媒体文件" 20 38 810 28 (New-Object System.Drawing.Font($FONT_UI, 12, [System.Drawing.FontStyle]::Bold)) $C_MUTED
 $lblFileMeta = New-UiLabel $pnlDrop "拖入文件后可进行转换、分析、对比或字幕处理" 20 68 810 20 (New-Object System.Drawing.Font($FONT_UI, 9)) $C_MUTED
 
 # 拖拽事件
@@ -868,13 +1080,13 @@ New-UiButton $grpConvert "低损耗 MP4" 16 44 { Clear-Console; if (-not $Script
 New-UiButton $grpConvert "普通 MP4" 220 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Normal $Script:CurrentFile } 188 34 | Out-Null
 
 $grpInspect = New-SectionPanel "媒体分析" 472 202 424 92
-New-UiButton $grpInspect "参数核对" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Test-Probe $Script:CurrentFile } 188 34 | Out-Null
-New-UiButton $grpInspect "生成频谱" 220 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; New-Spectrum $Script:CurrentFile } 188 34 | Out-Null
+New-UiButton $grpInspect "参数核对" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Test-Probe $Script:CurrentFile } 120 34 | Out-Null
+New-UiButton $grpInspect "编码信息" 152 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Show-MediaEncoding $Script:CurrentFile } 120 34 | Out-Null
+New-UiButton $grpInspect "生成频谱" 288 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; New-Spectrum $Script:CurrentFile } 120 34 | Out-Null
 
 $grpCompare = New-SectionPanel "质量对比" 24 310 584 92
-New-UiButton $grpCompare "SSIM 对比" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-SSIM $Script:CurrentFile $Script:SecondFile } 170 34 | Out-Null
-New-UiButton $grpCompare "差值图" 202 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Diff $Script:CurrentFile $Script:SecondFile } 170 34 | Out-Null
-New-UiButton $grpCompare "质量报告" 388 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Quality $Script:CurrentFile $Script:SecondFile } 176 34 | Out-Null
+New-UiButton $grpCompare "SSIM 对比" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-SSIM $Script:CurrentFile $Script:SecondFile } 264 34 | Out-Null
+New-UiButton $grpCompare "差值图" 296 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; if (-not $Script:SecondFile) { $s = Show-FileDialog "选择对比文件" "视频|*.mp4;*.webm;*.mkv;*.avi|所有|*.*"; if ($s) { $Script:SecondFile = $s; Update-FileLabel } else { Write-Warn "请选择对比文件"; return } }; Compare-Diff $Script:CurrentFile $Script:SecondFile } 264 34 | Out-Null
 
 $grpSubtitle = New-SectionPanel "字幕处理" 632 310 264 92
 New-UiButton $grpSubtitle "嵌入硬字幕" 16 44 { Clear-Console; if (-not $Script:CurrentFile) { Write-Warn "请先选择文件"; return }; Convert-Subtitle $Script:CurrentFile } 232 34 | Out-Null
@@ -922,6 +1134,7 @@ $lblStatus.Visible = $false
 # ============================================================
 if ($File1 -and (Test-Path -LiteralPath $File1)) {
     $Script:CurrentFile = $File1
+    $Script:CurrentFileInfo = Get-VideoInfo $File1
     if ($File2 -and (Test-Path -LiteralPath $File2)) { $Script:SecondFile = $File2 }
 }
 
